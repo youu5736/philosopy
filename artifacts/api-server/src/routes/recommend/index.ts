@@ -1208,25 +1208,54 @@ function scoreBookCandidate(
   const contents = (book.contents ?? "").toLowerCase();
   const title = book.title.toLowerCase();
   const topicWords = tokenizeKoreanish(`${context.sourceText} ${context.selectedKeyword ?? ""}`);
-  const philosophyWords = ["철학", "생각", "질문", "마음", "관계", "윤리", "가치", "인문", "상상", "친구", "자유", "정의"];
+  const philosophyWords = [
+    "철학",
+    "생각",
+    "질문",
+    "마음",
+    "관계",
+    "윤리",
+    "가치",
+    "인문",
+    "상상",
+    "친구",
+    "자유",
+    "정의",
+    "책임",
+    "선택",
+    "토론",
+    "딜레마",
+    "존재",
+    "정체성",
+  ];
   const childWords = ["어린이", "초등", "그림책", "동화", "청소년", "과학", "이야기", "교양"];
+  const infoOnlyWords = ["백과", "도감", "사전", "원리", "실험", "공학", "코딩", "만들기", "작동", "지식", "정보"];
   const adultWords = ["대학", "논문", "전공", "수험", "투자", "주식", "자격증", "석사", "박사", "문제집", "수능"];
 
   let score = 0;
   let contentTopicMatches = 0;
+  let philosophyMatches = 0;
   for (const word of topicWords) {
     if (title.includes(word)) score += 5;
     if (contents.includes(word)) contentTopicMatches += 1;
     if (haystack.includes(word)) score += 2;
   }
-  for (const word of philosophyWords) if (haystack.includes(word)) score += 2;
+  for (const word of philosophyWords) {
+    if (haystack.includes(word)) {
+      philosophyMatches += 1;
+      score += title.includes(word) ? 5 : 3;
+    }
+  }
   for (const word of childWords) if (haystack.includes(word)) score += grade === "lower" ? 2 : 1;
+  for (const word of infoOnlyWords) if (haystack.includes(word)) score -= philosophyMatches > 0 ? 1 : 4;
   if (book.thumbnail) score += 2;
   if ((book.contents ?? "").trim().length > 30) score += 2;
   if (topicWords.length > 0 && contentTopicMatches === 0) score -= 8;
+  if (philosophyMatches === 0) score -= 7;
+  if (philosophyMatches >= 2) score += 5;
   if (/퍼플|부크크|좋은땅|북랩/.test(book.publisher ?? "")) score -= 2;
-  if (grade === "lower" && /그림책|동화|어린이|초등/.test(haystack)) score += 3;
-  if (grade === "higher" && /인문|교양|청소년|철학|생각/.test(haystack)) score += 3;
+  if (grade === "lower" && /철학동화|그림책|동화|어린이|초등|생각|마음/.test(haystack)) score += 5;
+  if (grade === "higher" && /인문|교양|청소년|철학|윤리|토론|생각/.test(haystack)) score += 5;
   for (const word of adultWords) if (haystack.includes(word)) score -= 6;
 
   return score;
@@ -1313,6 +1342,34 @@ function buildRecommendationPayload(
   };
 }
 
+function compactText(text: string | null | undefined, maxLength = 220): string {
+  return (text ?? "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, maxLength);
+}
+
+function latestMessage(history: ChatMessage[], role: ChatMessage["role"]): string {
+  return [...history].reverse().find((item) => item.role === role)?.content ?? "";
+}
+
+function classifyStudentQuestion(message: string): "followup" | "mindRobotHuman" | "whyHow" | "relationship" | "emotion" | "general" {
+  if (/그럼|그러면|그래서|아까|방금|그렇다면/.test(message)) return "followup";
+  if (/인간|사람|로봇|마음|생각|영혼|정체성/.test(message)) return "mindRobotHuman";
+  if (/왜|어떻게|무엇|뭐가|무슨|기준/.test(message)) return "whyHow";
+  if (/친구|관계|함께|도와|배려|책임/.test(message)) return "relationship";
+  if (/화|속상|슬픔|기쁨|무서|감정|마음/.test(message)) return "emotion";
+  return "general";
+}
+
+function hasSimilarWords(a: string, b: string): boolean {
+  const aWords = new Set(tokenizeKoreanish(a));
+  const bWords = tokenizeKoreanish(b);
+  if (aWords.size === 0 || bWords.length === 0) return false;
+  const shared = bWords.filter((word) => aWords.has(word)).length;
+  return shared >= 2 || shared / Math.max(1, Math.min(aWords.size, bWords.length)) >= 0.45;
+}
+
 async function selectAndDescribeBalanced(
   context: RecommendationContext,
   books: KakaoBook[],
@@ -1352,11 +1409,15 @@ ${bookList}
 Write all output fields in Korean.
 Quality rules:
 - Never repeat or expose an internal routing sentence such as "추천해줘" or "고른 철학 탐구 키워드".
-- Recommendation reason must mention the student interest, selected keyword if present, the chosen book title/description, and the philosophical connection.
-- philosophyKnowledge must explicitly include either a philosopher name or a clear philosophical concept.
+- Choose a book that can become a philosophy conversation, not merely a fun or informational match.
+- Prefer books whose title or description clearly invites questions about values, responsibility, freedom, justice, identity, mind, relationship, emotion, or existence.
+- If a candidate is mainly science/information, choose it only when its description clearly supports a philosophical question.
+- Recommendation reason must mention the student interest, selected keyword if present, the chosen book title/description, and one concrete philosophical connection.
+- philosophyKnowledge must explicitly include either a philosopher name or a clear philosophical concept connected to a scene or idea in the chosen book.
 - philosopherName must be one stable persona that fits the recommendation.
-- philosophicalLens must be a short phrase, such as "기술 윤리와 관계", "우주와 존재", or "감정과 자유".
+- philosophicalLens must be a short concept phrase only, such as "기술 윤리", "마음과 정체성", "관계와 책임", "감정과 자유", or "우주와 존재".
 - thinkingQuestion must be an open philosophical question for the student.
+- For lower grades, write simple and concrete Korean. For upper grades, use one easy concept word but stay elementary-student friendly.
 
 Return only JSON matching the schema.`;
 
@@ -1418,6 +1479,8 @@ function fallbackPhilosopherReplyContextual({
   grade,
   bookTitle,
   philosophicalLens,
+  previousStudentMessage = "",
+  previousPhilosopherReply = "",
   turnIndex = 0,
 }: {
   philosopherName: string;
@@ -1425,27 +1488,37 @@ function fallbackPhilosopherReplyContextual({
   grade: "lower" | "higher";
   bookTitle: string;
   philosophicalLens?: string | null;
+  previousStudentMessage?: string;
+  previousPhilosopherReply?: string;
   turnIndex?: number;
 }): string {
-  const lens = philosophicalLens ? `${philosophicalLens}라는 생각` : "오늘의 철학 질문";
-  const variant =
-    Array.from(`${message}${bookTitle}${turnIndex}`).reduce((sum, char) => sum + char.charCodeAt(0), 0) % 3;
+  const lens = philosophicalLens || "철학 질문";
+  const kind = classifyStudentQuestion(message);
+  const isRepeat = hasSimilarWords(message, previousStudentMessage) || previousPhilosopherReply.includes(message.slice(0, 12));
+
   if (grade === "lower") {
-    if (variant === 0) {
-      return `나는 ${philosopherName}처럼 네 말을 먼저 가만히 들어볼게. "${message}"라는 말은 ${bookTitle} 속 장면과 이어져 있고, ${lens}을 떠올리게 해. 지금 네 생각에서 가장 중요하게 지키고 싶은 마음은 무엇일까?`;
+    if (isRepeat || kind === "followup") {
+      return `아까 이야기에서 한 걸음 더 가 보자. ${bookTitle} 속 친구를 떠올리면, 마음이 있다는 말은 그냥 느끼는 것뿐 아니라 누군가를 어떻게 대할지 고르는 일과도 이어져. 그래서 이번 질문은 "겉모습보다 선택이 더 중요할까?"로 바꿔 생각해 볼 수 있어.`;
     }
-    if (variant === 1) {
-      return `좋은 질문이야. ${bookTitle}을 떠올려 보면 "${message}"는 누가 누구를 소중하게 대해야 하는지 묻는 말처럼 들려. ${lens}으로 보면, 상대를 물건처럼 보지 않는 태도가 먼저 필요해.`;
+    if (kind === "mindRobotHuman") {
+      return `마음이 있는 로봇이 바로 인간이라고 말하기는 어려워. 하지만 그 로봇이 아픔을 느끼고 친구를 걱정한다면, 우리는 함부로 물건처럼 대하면 안 돼. ${philosopherName}라면 ${lens}을 떠올리며 "어떻게 대해야 좋을까?"를 먼저 물었을 거야.`;
     }
-    return `"${message}"라고 물은 건 이미 깊이 생각하고 있다는 뜻이야. ${bookTitle} 속 상황에 이 질문을 놓아 보면, 마음이 있는 존재와 마음이 없어 보이는 존재를 어떻게 대할지 생각해 볼 수 있어.`;
+    if (kind === "whyHow") {
+      return `좋은 질문이야. ${bookTitle}에서처럼 어떤 기준을 세우면 생각이 조금 또렷해져. 나는 "친구를 다치게 하지 않는가"와 "스스로 고를 수 있는가"를 먼저 살펴보고 싶어.`;
+    }
+    return `${bookTitle}과 이어서 생각하면, 네 질문은 ${lens}에 닿아 있어. 철학자는 정답을 빨리 말하기보다 네가 무엇을 소중하게 보는지 살펴보게 도와줘.`;
   }
-  if (variant === 0) {
-    return `${philosopherName}의 관점에서 보면, "${message}"에는 이미 하나의 판단 기준이 숨어 있어. ${bookTitle}과 연결해 보면 ${lens}을 따져 볼 수 있지. 네가 그렇게 생각한 근거가 다른 사람에게도 설득력 있을지 한 번 점검해 볼까?`;
+
+  if (isRepeat || kind === "followup") {
+    return `아까 답과 같은 말로 돌아가지 않고, 이번에는 기준을 더 좁혀 보자. ${bookTitle}과 연결하면 핵심은 "마음이 있느냐"만이 아니라 그 존재가 선택하고 책임질 수 있느냐야. ${lens}라는 관점에서는 감정, 선택, 책임 중 무엇을 인간다움의 기준으로 삼을지가 갈라져.`;
   }
-  if (variant === 1) {
-    return `그 질문은 ${bookTitle}의 핵심 장면을 철학적으로 다시 보는 좋은 방식이야. ${lens}으로 보면 중요한 건 "가능한가"뿐 아니라 "그렇게 대해도 괜찮은가"까지 따지는 거야.`;
+  if (kind === "mindRobotHuman") {
+    return `${philosopherName}의 관점에서 보면, 마음이 있는 로봇이 곧바로 인간이라고 단정할 수는 없어. 다만 감정을 느끼고 관계를 맺고 자기 선택에 책임질 수 있다면, 단순한 기계와는 다르게 대해야 해. ${bookTitle}을 떠올리면 이 질문은 "인간다움의 기준은 몸일까, 마음일까, 책임일까?"로 깊어져.`;
   }
-  return `${philosopherName}라면 네 질문에서 관계의 기준을 먼저 찾으려 할 거야. ${bookTitle}과 이어 보면, 우리는 편리한 대상과 함께 살아가는 존재를 다르게 대해야 하는지 물을 수 있어. 그래서 "${message}"는 단순한 호기심이 아니라 윤리의 질문이 돼.`;
+  if (kind === "whyHow") {
+    return `이 질문에는 먼저 기준이 필요해. ${bookTitle}과 ${lens}을 함께 보면, 우리는 겉모습보다 선택의 이유와 책임을 따져 볼 수 있어. 예외도 있어야 해. 마음이 있다고 말하지만 남을 계속 해친다면, 우리는 그 마음을 어떻게 평가해야 할까?`;
+  }
+  return `${philosopherName}라면 네 질문에서 ${lens}의 기준을 먼저 찾으려 할 거야. ${bookTitle}과 이어 보면, 중요한 건 정답 하나가 아니라 어떤 이유로 그렇게 판단하는지야. 초등학생에게도 철학은 바로 이런 기준을 천천히 세워 보는 일이야.`;
 }
 
 function genericBalancedText(
@@ -1538,6 +1611,10 @@ async function chatWithPhilosopherBalanced({
   const personaName =
     philosopherName?.trim() ||
     cleanPhilosopherName(`${philosophicalLens ?? ""} ${philosophyKnowledge ?? ""}`);
+  const previousStudentMessage = latestMessage(history, "student");
+  const previousPhilosopherReply = latestMessage(history, "philosopher");
+  const questionType = classifyStudentQuestion(message);
+  const repeatedQuestion = hasSimilarWords(message, previousStudentMessage);
 
   if (
     !process.env.AI_INTEGRATIONS_GEMINI_BASE_URL ||
@@ -1551,6 +1628,8 @@ async function chatWithPhilosopherBalanced({
         grade,
         bookTitle,
         philosophicalLens,
+        previousStudentMessage,
+        previousPhilosopherReply,
         turnIndex: history.length,
       }),
     };
@@ -1587,12 +1666,23 @@ ${previousReplies || "(none)"}
 Student's latest message:
 ${message}
 
+Conversation analysis:
+- Latest question type: ${questionType}
+- Similar to previous student message: ${repeatedQuestion ? "yes" : "no"}
+- Previous student message: ${compactText(previousStudentMessage) || "(none)"}
+- Previous philosopher reply summary: ${compactText(previousPhilosopherReply) || "(none)"}
+
 Rules:
-- First respond directly to the student's latest message.
-- Connect naturally to the book, one scene or idea from it, and the philosophical lens.
-- Do not always ask a Socratic question. Ask at most one short follow-up question only when it helps.
-- Avoid reusing the same opening phrase, same sentence pattern, or same question from previous replies.
-- Keep it ${grade === "lower" ? "3 short, easy sentences" : "3-5 clear sentences"}.
+- First answer the student's latest message directly in the first sentence.
+- If the latest question is similar to the previous one, explicitly extend the idea instead of repeating the same answer.
+- Do not reuse the previous reply's opening, sentence structure, final question, or conclusion.
+- Connect to the book and philosophical lens only where it fits the student's actual question.
+- Stay in the persona of ${personaName}, but do not overact or lecture.
+- Ask at most one short follow-up question, and only if it is different from previous replies.
+- ${grade === "lower"
+    ? "For grades 1-3: use 2-3 short sentences, everyday examples like friends/classroom/home, no hard terms unless immediately explained."
+    : "For grades 4-6: use 3-5 clear sentences, include one easy concept word such as 기준/책임/정체성/관계 and explain it simply."}
+- Always remember the student is in elementary school. Never sound like a university lecture.
 - Return only JSON.`;
 
   try {
@@ -1615,6 +1705,8 @@ Rules:
           grade,
           bookTitle,
           philosophicalLens,
+          previousStudentMessage,
+          previousPhilosopherReply,
           turnIndex: history.length,
         }),
     };
@@ -1630,6 +1722,8 @@ Rules:
         grade,
         bookTitle,
         philosophicalLens,
+        previousStudentMessage,
+        previousPhilosopherReply,
         turnIndex: history.length,
       }),
     };
