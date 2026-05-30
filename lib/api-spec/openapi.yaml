@@ -1,0 +1,414 @@
+openapi: 3.1.0
+info:
+  # Do not change the title, if the title changes, the import paths will be broken
+  title: Api
+  version: 0.1.0
+  description: API specification for 마음 튼튼 철학 사서
+servers:
+  - url: /api
+    description: Base API path
+tags:
+  - name: health
+    description: Health operations
+  - name: recommend
+    description: Philosophy book recommendation operations
+paths:
+  /healthz:
+    get:
+      operationId: healthCheck
+      tags: [health]
+      summary: Health check
+      description: Returns server health status
+      responses:
+        "200":
+          description: Healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+
+  /recommend/by-text:
+    post:
+      operationId: recommendByText
+      tags: [recommend]
+      summary: Recommend philosophy books based on emotion or interest text
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TextRecommendationInput"
+      responses:
+        "200":
+          description: Book recommendation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BookRecommendation"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /recommend/interest-keywords:
+    post:
+      operationId: generateInterestKeywords
+      tags: [recommend]
+      summary: Generate three philosophical inquiry keyword options from an interest
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GenerateInterestKeywordsInput"
+      responses:
+        "200":
+          description: Three keyword suggestions
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InterestKeywordSuggestions"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /recommend/by-keyword:
+    post:
+      operationId: recommendByKeyword
+      tags: [recommend]
+      summary: Recommend philosophy books based on a selected inquiry keyword
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/KeywordRecommendationInput"
+      responses:
+        "200":
+          description: Book recommendation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BookRecommendation"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /recommend/philosopher-chat:
+    post:
+      operationId: chatWithPhilosopher
+      tags: [recommend]
+      summary: Chat with a philosopher persona related to the recommendation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PhilosopherChatInput"
+      responses:
+        "200":
+          description: Philosopher persona reply
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PhilosopherChatResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /recommend/by-image:
+    post:
+      operationId: recommendByImage
+      tags: [recommend]
+      summary: Recommend a connecting philosophy book based on an uploaded book cover image
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ImageRecommendationInput"
+      responses:
+        "200":
+          description: Book recommendation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BookRecommendation"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+components:
+  schemas:
+    HealthStatus:
+      type: object
+      properties:
+        status:
+          type: string
+      required:
+        - status
+
+    TextRecommendationInput:
+      type: object
+      required:
+        - text
+        - gradeGroup
+      properties:
+        text:
+          type: string
+          description: The student's feelings, worries, or interests in Korean
+        gradeGroup:
+          type: string
+          enum: [lower, upper]
+          description: "lower = grades 1-3, upper = grades 4-6"
+        searchType:
+          type: string
+          enum: [emotion, interest]
+          description: "emotion = feeling-based search, interest = topic/hobby-based search"
+
+    GenerateInterestKeywordsInput:
+      type: object
+      required:
+        - text
+        - gradeGroup
+      properties:
+        text:
+          type: string
+          description: The student's interest or topic in Korean
+        gradeGroup:
+          type: string
+          enum: [lower, upper]
+          description: "lower = grades 1-3, upper = grades 4-6"
+
+    InterestKeywordOption:
+      type: object
+      required:
+        - title
+        - description
+        - keyword
+      properties:
+        title:
+          type: string
+          description: Short button title for a third-grade student
+        description:
+          type: string
+          description: Easy explanation of the philosophical inquiry angle
+        keyword:
+          type: string
+          description: Search keyword to use with Kakao book search
+
+    InterestKeywordSuggestions:
+      type: object
+      required:
+        - keywords
+      properties:
+        keywords:
+          type: array
+          minItems: 3
+          maxItems: 3
+          items:
+            $ref: "#/components/schemas/InterestKeywordOption"
+
+    KeywordRecommendationInput:
+      type: object
+      required:
+        - keyword
+        - gradeGroup
+      properties:
+        keyword:
+          type: string
+          description: Selected philosophical inquiry keyword
+        originalText:
+          type: string
+          description: Original student interest text
+        gradeGroup:
+          type: string
+          enum: [lower, upper]
+          description: "lower = grades 1-3, upper = grades 4-6"
+
+    PhilosopherChatMessage:
+      type: object
+      required:
+        - role
+        - content
+      properties:
+        role:
+          type: string
+          enum: [student, philosopher]
+        content:
+          type: string
+
+    PhilosopherChatInput:
+      type: object
+      required:
+        - message
+        - gradeGroup
+        - bookTitle
+      properties:
+        message:
+          type: string
+          description: Student message to the philosopher persona
+        history:
+          type: array
+          description: Previous chat messages
+          items:
+            $ref: "#/components/schemas/PhilosopherChatMessage"
+        gradeGroup:
+          type: string
+          enum: [lower, upper]
+          description: "lower = grades 1-3, upper = grades 4-6"
+        bookTitle:
+          type: string
+          description: Recommended book title
+        bookAuthor:
+          type: string
+          description: Recommended book author
+        philosophyKnowledge:
+          type: ["string", "null"]
+          description: Philosopher or philosophy context shown in the recommendation
+        recommendationReason:
+          type: string
+          description: Reason the book was recommended
+        thinkingQuestion:
+          type: string
+          description: Reflective question shown to the student
+        philosopherName:
+          type: ["string", "null"]
+          description: Recommended philosopher persona name
+        philosophicalLens:
+          type: ["string", "null"]
+          description: Short philosophical lens for the recommendation
+
+    PhilosopherChatResponse:
+      type: object
+      required:
+        - philosopherName
+        - reply
+      properties:
+        philosopherName:
+          type: string
+        reply:
+          type: string
+
+    ImageRecommendationInput:
+      type: object
+      required:
+        - imageBase64
+        - gradeGroup
+      properties:
+        imageBase64:
+          type: string
+          description: Base64-encoded image of the book cover
+        mimeType:
+          type: string
+          description: MIME type of the image (e.g. image/jpeg)
+        fallbackTitle:
+          type: ["string", "null"]
+          description: Optional fallback book title if image recognition is unclear
+
+        gradeGroup:
+          type: string
+          enum: [lower, upper]
+          description: "lower = grades 1-3, upper = grades 4-6"
+
+    BookRecommendation:
+      type: object
+      required:
+        - empathyMessage
+        - bookTitle
+        - bookAuthor
+        - recommendationReason
+        - thinkingQuestion
+        - bookId
+      properties:
+        bookId:
+          type: string
+          description: ID of the selected book from the database
+        empathyMessage:
+          type: string
+          description: "따뜻한 공감의 한마디 — warm word of empathy"
+        bookTitle:
+          type: string
+          description: Recommended book title (from database)
+        bookAuthor:
+          type: string
+          description: Book author name (from database)
+        coverUrl:
+          type: ["string", "null"]
+          description: Book cover image URL (real from Kakao API, or fallback)
+        publisher:
+          type: ["string", "null"]
+          description: Book publisher name (from Kakao API)
+        recommendationReason:
+          type: string
+          description: "선생님의 추천 이유 — reason for recommending this book"
+        thinkingQuestion:
+          type: string
+          description: "마음 씨앗 질문 — a deep philosophical dilemma or reflective question"
+        philosophyKnowledge:
+          type: ["string", "null"]
+          description: "철학 돋보기 — grade-appropriate philosophical concept, quote, or anecdote related to the book"
+        selectedKeyword:
+          type: ["string", "null"]
+          description: Selected philosophical inquiry keyword
+        sourceInterest:
+          type: ["string", "null"]
+          description: Original student interest text
+        philosopherName:
+          type: ["string", "null"]
+          description: Recommended philosopher persona name
+        philosophicalLens:
+          type: ["string", "null"]
+          description: Short philosophical lens for the recommendation
+        candidateCount:
+          type: ["number", "null"]
+          description: Number of Kakao book candidates considered
+        detectedBook:
+          type: ["string", "null"]
+          description: Book title detected from image (for image-based recommendations)
+
+    ApiError:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          type: string

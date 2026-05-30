@@ -1,0 +1,23 @@
+We want to elevate the output of '마음튼튼철학사서' from a standard book recommendation to a deep, educational, and philosophical guidance experience. We need to update the AI response schema to include a new section and make all other fields much more philosophically rich.
+
+Please implement the following changes in backend prompts, data parsing, and frontend UI:
+
+1. Update Backend JSON Response Schema:
+   - Add a new key: `philosophy_knowledge` (string). This will hold the grade-appropriate philosophical concepts/anecdotes related to the recommended book.
+
+2. Upgrade AI Prompting for Result Generation:
+   - Reinforce that every recommendation must be viewed through a "Philosophical and Humanities Lens".
+   - Modify the output fields as follows:
+     * `recommendation_reason` (추천 이유): Connect the student's emotion/interest directly to a philosophical viewpoint or school of thought in a kid-friendly way. (e.g., "이 책은 고대 철학자 스토아학파가 말한 '내가 바꿀 수 있는 것에 집중하는 법'을 담고 있어서 추천해요.")
+     * `book_description` (책 설명): Keep it concise but highlight the ethical dilemmas or core message of the book.
+     * `philosophy_knowledge` (신설 - 철학 돋보기): Provide a brief, fascinating piece of philosophical history, a famous quote, or a concept related to the book. 
+       - For Lowers: Use friendly anecdotes or simple metaphors (e.g., "소크라테스 할아버지는요...").
+       - For Highers: Introduce actual philosophical terms or thinking frameworks smoothly (e.g., "도덕경에 나오는 '무위자연'이란...", "정의란 무엇일까?").
+     * `heart_seed_question` (마음 씨앗 질문): Instead of a simple psychological check-in, make it a deep, reflective philosophical dilemma or open-ended question that prompts critical thinking.
+
+3. Frontend UI Update:
+   - In the result display component, add a beautiful new card/section titled "🏛️ 사서 선생님의 철학 돋보기" (or 오늘의 철학 한 조각).
+   - Render the content from `philosophy_knowledge` beautifully inside this section.
+   - Ensure it is visually distinguished from the basic book description using custom styling (e.g., a subtle background color or distinct borders).
+
+Please rewrite the prompt template and refactor the UI rendering code to apply this philosophical upgrade.

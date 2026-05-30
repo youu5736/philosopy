@@ -1,0 +1,31 @@
+kind = "web"
+previewPath = "/"
+title = "마음 튼튼 철학 사서"
+version = "1.0.0"
+id = "artifacts/philosophy-librarian"
+router = "path"
+
+[[integratedSkills]]
+name = "react-vite"
+version = "1.0.0"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 25458
+
+[services.development]
+run = "pnpm --filter @workspace/philosophy-librarian run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/philosophy-librarian", "run", "build" ]
+publicDir = "artifacts/philosophy-librarian/dist/public"
+serve = "static"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "25458"
+BASE_PATH = "/"

@@ -1,0 +1,14 @@
+uploads = []
+outputs = []
+
+[[generated]]
+id = "3F9Y3cLDsKmKC3Z-uVkLN"
+uri = "file://artifacts/philosophy-librarian/src/assets/images/librarian-owl.png"
+type = "image"
+title = "Cute librarian owl illustration"
+
+[[generated]]
+id = "qyn6Pi1z2gob7-p6-l847"
+uri = "file://artifacts/philosophy-librarian/src/assets/images/library-bg.png"
+type = "image"
+title = "Cozy library background"

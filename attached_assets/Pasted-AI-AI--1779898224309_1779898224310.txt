@@ -1,0 +1,80 @@
+AI가 여전히 가짜 책을 지어내서 추천하는 문제가 해결되지 않았어. AI의 자율성을 제한하고 완벽하게 실제 책만 추천하도록 백엔드 로직을 '데이터베이스 기반 선택 방식'으로 완전히 리팩토링(수정)해줘.
+
+[구현 요구사항]
+1. 백엔드 코드(server.js 또는 관련 컨트롤러)에 아래의 실제 출간된 초등 철학 도서 목록을 `BOOKS_DATABASE`라는 고정된 배열(Array) 데이터로 선언해줘.
+
+2. 학생들이 학년과 감정을 입력하면, AI에게는 "이 BOOKS_DATABASE 목록을 보고, 학생의 학년과 감정에 가장 잘 맞는 책의 ID를 하나 골라라"라고 지시해줘. 
+   - AI는 절대 새로운 책 제목이나 작가를 창작하면 안 되고, 오직 데이터베이스에 있는 책의 ID만 반환해야 해.
+   - AI의 역할은 선택한 책에 맞는 [💬 따뜻한 공감의 한마디]와 [💡 선생님의 추천 이유], [🌱 생각 열매 질문]을 작성하는 것으로만 제한해줘.
+
+[BOOKS_DATABASE 진짜 도서 목록 데이터]
+[
+  {
+    "id": "lower_1",
+    "grade": "lower",
+    "title": "기분을 말해 봐",
+    "author": "앤서니 브라운 (웅진주니어)",
+    "coverUrl": "https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?w=400",
+    "theme": "감정, 속상함, 우울함, 슬픔, 표현"
+  },
+  {
+    "id": "lower_2",
+    "grade": "lower",
+    "title": "틀려도 괜찮아",
+    "author": "마키타 신지 (토토북)",
+    "coverUrl": "https://images.unsplash.com/photo-1512820790803-83ca734da794?w=400",
+    "theme": "자존감, 용기, 불안, 학교생활, 실수"
+  },
+  {
+    "id": "lower_3",
+    "grade": "lower",
+    "title": "아름다운 가치 사전",
+    "author": "채인선 (한울림어린이)",
+    "coverUrl": "https://images.unsplash.com/photo-1516979187457-637abb4f9353?w=400",
+    "theme": "도덕, 인성, 올바름, 가치, 마음"
+  },
+  {
+    "id": "lower_4",
+    "grade": "lower",
+    "title": "생각한다는 건 뭘까?",
+    "author": "오스카 브르니피에 (만화나무)",
+    "coverUrl": "https://images.unsplash.com/photo-1497633762265-9d179a990aa6?w=400",
+    "theme": "철학입문, 질문, 호기심, 생각"
+  },
+  {
+    "id": "higher_1",
+    "grade": "higher",
+    "title": "어린이를 위한 정의란 무엇인가",
+    "author": "마이클 샌델 원작 / 신현주 글 (아이세움)",
+    "coverUrl": "https://images.unsplash.com/photo-1589829545856-d10d557cf95f?w=400",
+    "theme": "정의, 공정함, 억울함, 규칙, 사회, 양보"
+  },
+  {
+    "id": "higher_2",
+    "grade": "higher",
+    "title": "소크라테스 스타일에 빠져 봐!",
+    "author": "김헌 (아울북)",
+    "coverUrl": "https://images.unsplash.com/photo-1543002588-bfa74002ed7e?w=400",
+    "theme": "생각하는 힘, 질문, 지혜, 소크라테스, 논리"
+  },
+  {
+    "id": "higher_3",
+    "grade": "higher",
+    "title": "플라톤 아저씨네 빵집",
+    "author": "정재은 (주니어김영사)",
+    "coverUrl": "https://images.unsplash.com/photo-1509021436665-8f07dbf5bf1d?w=400",
+    "theme": "국가, 사회, 이상향, 플라톤, 공동체"
+  },
+  {
+    "id": "higher_4",
+    "grade": "higher",
+    "title": "니체 아저씨네 우장산 약수터",
+    "author": "정재은 (주니어김영사)",
+    "coverUrl": "https://images.unsplash.com/photo-1506880018603-83d5b814b5a6?w=400",
+    "theme": "실존주의, 자아, 나다움, 극복, 용기, 니체"
+  }
+]
+
+3. 결과 화면(UI)에서는 AI가 선택한 진짜 책의 제목, 작가, 그리고 내가 지정해 둔 Unsplash 이미지 주소(coverUrl)가 깨지지 않고 부드럽게 출력되도록 프론트엔드 카드 컴포넌트도 연동해줘.
+
+이 구조로 백엔드 프롬프트와 추천 시스템 코드를 완전히 새로 작성해줘.

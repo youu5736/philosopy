@@ -1,0 +1,23 @@
+[Core Engine Upgrade: Advanced Contextual Empathy & Hyper-Diversified Book Selection]
+
+We need to fundamentally upgrade the core recommendation engine of '마음튼튼철학사서' to achieve two goals:
+1. Drastically improve the AI's ability to analyze and empathize with the student's inner emotions/interests.
+2. Maximize the diversity of recommended books, eliminating repetitive or superficial choices.
+
+Please refactor the backend prompt templates and keyword generation logic with these strict instructions:
+
+1. Multilayered Contextual Interpretation (고민과 관심사의 다각도 심층 분석)
+   - Do not perform simple keyword matching. The AI must read between the lines to find the "Root Cause" or "Core Concept".
+   - For Emotions: If a student inputs a simple phrase (e.g., "I'm jealous of my friend"), look for underlying layers like comparison, self-worth, or hidden admiration. Map this to deep philosophical frameworks (e.g., Spinoza's theory of emotions, Stoic resilience).
+   - For Interests: If a student inputs a topic (e.g., "Space" or "History"), do not just look for facts. Connect the topic to philosophical inquiry (e.g., Space -> Existential wonder and our place in the universe; History -> Perspectives, critical thinking, and the evolution of human thoughts).
+
+2. Hyper-Dynamic Keyword Combinations (다이내믹 검색어 풀 확장)
+   - To avoid pulling the exact same 5 books from the Kakao API every time, the AI must dynamically synthesize unique, abstract, and high-quality search terms.
+   - Mix and match variables: [Core Emotion/Concept Synonym] + [Target Grade Context] + [Humanities/Philosophy/Essay Tag].
+   - Examples of expanded search terms: "어린이 감정 인문학", "초등 고학년 주체성 에세이", "생각하는 역사 그림책", "어린이 관계 철학 동화", "초등 마음 성장 가치".
+
+3. Anti-Cliché Selection Mandate (뻔한 대중 서적 선택 금지 룰)
+   - When filtering the 5 Kakao API results, the AI selector must actively REJECT overly simplistic lifestyle comics, generic textbooks, or toddler-level books.
+   - Instruct the AI: "Deliberately look for hidden gems, thought-provoking graphic novels, or beautifully written adapted classics. Prioritize books that pose a meaningful ethical dilemma or introduce genuine philosophical questions over books that just offer simple moral clichés."
+
+Please rewrite the internal prompt templates for both the keyword-generator and the final-selector to implement this intellectual and emotional upgrade.
