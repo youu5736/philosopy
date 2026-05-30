@@ -330,7 +330,7 @@ async function generateInterestKeywordOptions(
   studentText: string,
 ): Promise<InterestKeywordOption[]> {
   if (!hasGeminiConfig()) {
-    throw new GeminiUnavailableError(geminiErrorMessage("철학 탐구 키워드 생성"));
+    return fallbackInterestKeywordOptions(studentText);
   }
 
   const prompt = `너는 초등학생을 위한 철학 사서야.
@@ -392,8 +392,7 @@ Return only JSON matching the provided schema.`;
     console.warn("[recommend] Gemini interest keyword generation failed.", {
       message: error instanceof Error ? error.message : String(error),
     });
-    if (error instanceof GeminiUnavailableError) throw error;
-    throw new GeminiUnavailableError("Gemini가 철학 탐구 키워드를 만들지 못했어요. API 키와 Gemini 사용 가능 상태를 확인해 주세요.", 502);
+    return fallbackInterestKeywordOptions(studentText);
   }
 }
 
@@ -1426,7 +1425,10 @@ async function selectAndDescribeBalanced(
 ): Promise<{ book: KakaoBook; text: Omit<AiSelection, "selectedIndex"> }> {
   const candidateBooks = books.slice(0, 24);
   if (!hasGeminiConfig()) {
-    throw new GeminiUnavailableError(geminiErrorMessage("추천 도서 설명 생성"));
+    return {
+      book: candidateBooks[0],
+      text: genericBalancedText(candidateBooks[0], grade, context),
+    };
   }
 
   const bookList = candidateBooks
@@ -1509,8 +1511,10 @@ Return only JSON matching the schema.`;
     console.warn("[recommend] Gemini balanced recommendation failed.", {
       message: error instanceof Error ? error.message : String(error),
     });
-    if (error instanceof GeminiUnavailableError) throw error;
-    throw new GeminiUnavailableError("Gemini가 추천 도서 설명을 만들지 못했어요. Gemini API 키, 할당량, 모델 접근 권한을 확인해 주세요.", 502);
+    return {
+      book: candidateBooks[0],
+      text: genericBalancedText(candidateBooks[0], grade, context),
+    };
   }
 }
 
@@ -1658,7 +1662,19 @@ async function chatWithPhilosopherBalanced({
   const repeatedQuestion = hasSimilarWords(message, previousStudentMessage);
 
   if (!hasGeminiConfig()) {
-    throw new GeminiUnavailableError(geminiErrorMessage("철학자와 대화하기"));
+    return {
+      philosopherName: personaName,
+      reply: fallbackPhilosopherReplyContextual({
+        philosopherName: personaName,
+        message,
+        grade,
+        bookTitle,
+        philosophicalLens,
+        previousStudentMessage,
+        previousPhilosopherReply,
+        turnIndex: history.length,
+      }),
+    };
   }
 
   const historyText = history
@@ -1740,8 +1756,19 @@ Rules:
     console.warn("[recommend] Gemini balanced philosopher chat failed.", {
       message: error instanceof Error ? error.message : String(error),
     });
-    if (error instanceof GeminiUnavailableError) throw error;
-    throw new GeminiUnavailableError("Gemini가 철학자 답변을 만들지 못했어요. API 키, 할당량, 모델 접근 권한을 확인해 주세요.", 502);
+    return {
+      philosopherName: personaName,
+      reply: fallbackPhilosopherReplyContextual({
+        philosopherName: personaName,
+        message,
+        grade,
+        bookTitle,
+        philosophicalLens,
+        previousStudentMessage,
+        previousPhilosopherReply,
+        turnIndex: history.length,
+      }),
+    };
   }
 }
 
