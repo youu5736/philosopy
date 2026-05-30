@@ -46,6 +46,40 @@ type GeminiAi = typeof import("@workspace/integrations-gemini-ai")["ai"];
 
 let warnedMissingGeminiEnv = false;
 
+class GeminiUnavailableError extends Error {
+  readonly statusCode: number;
+
+  constructor(message: string, statusCode = 503) {
+    super(message);
+    this.name = "GeminiUnavailableError";
+    this.statusCode = statusCode;
+  }
+}
+
+function hasGeminiConfig(): boolean {
+  return Boolean(
+    process.env.AI_INTEGRATIONS_GEMINI_BASE_URL &&
+      process.env.AI_INTEGRATIONS_GEMINI_API_KEY,
+  );
+}
+
+function geminiErrorMessage(feature: string): string {
+  return `${feature} 기능은 Gemini 연결이 필요해요. Render Environment Variables에 AI_INTEGRATIONS_GEMINI_API_KEY와 AI_INTEGRATIONS_GEMINI_BASE_URL이 제대로 들어갔는지 확인해 주세요.`;
+}
+
+function sendGeminiError(res: { status: (code: number) => { json: (body: unknown) => void } }, error: unknown): boolean {
+  if (!(error instanceof GeminiUnavailableError)) return false;
+  res.status(error.statusCode).json({
+    error: error.message,
+    aiSource: "gemini-unavailable",
+  });
+  return true;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 function hasKoreanBatchim(text: string): boolean {
   const lastChar = text.trim().charAt(text.trim().length - 1);
   const code = lastChar.charCodeAt(0);
@@ -139,10 +173,7 @@ function recoverModelJson(source: string): unknown | null {
 }
 
 async function getGeminiAi(): Promise<GeminiAi | null> {
-  if (
-    !process.env.AI_INTEGRATIONS_GEMINI_BASE_URL ||
-    !process.env.AI_INTEGRATIONS_GEMINI_API_KEY
-  ) {
+  if (!hasGeminiConfig()) {
     if (!warnedMissingGeminiEnv) {
       warnedMissingGeminiEnv = true;
       console.warn(
@@ -180,28 +211,48 @@ async function generateGeminiText(
     throw new Error("Gemini AI environment variables are not configured.");
   }
 
-  const response = await fetch(
-    `${baseUrl.replace(/\/$/, "")}/models/gemini-2.5-flash:generateContent`,
-    {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "x-goog-api-key": apiKey,
-      },
-      body: JSON.stringify({
-        contents: [{ role: "user", parts }],
-        generationConfig: {
-          maxOutputTokens,
-          ...(json ? { responseMimeType: "application/json" } : {}),
-          ...(responseSchema ? { responseSchema } : {}),
-        },
-      }),
+  const requestUrl = `${baseUrl.replace(/\/$/, "")}/models/gemini-2.5-flash:generateContent`;
+  const requestBody = JSON.stringify({
+    contents: [{ role: "user", parts }],
+    generationConfig: {
+      maxOutputTokens,
+      ...(json ? { responseMimeType: "application/json" } : {}),
+      ...(responseSchema ? { responseSchema } : {}),
     },
-  );
+  });
 
-  if (!response.ok) {
-    const body = await response.text();
-    throw new Error(`Gemini API request failed (${response.status}): ${body.slice(0, 500)}`);
+  let response: Response | null = null;
+  let lastError: unknown = null;
+
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      response = await fetch(requestUrl, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-goog-api-key": apiKey,
+        },
+        body: requestBody,
+      });
+
+      if (response.ok) break;
+
+      const body = await response.text();
+      lastError = new Error(`Gemini API request failed (${response.status}): ${body.slice(0, 500)}`);
+
+      if (![408, 429, 500, 502, 503, 504].includes(response.status) || attempt === 3) {
+        throw lastError;
+      }
+    } catch (error) {
+      lastError = error;
+      if (attempt === 3) throw error;
+    }
+
+    await sleep(350 * attempt);
+  }
+
+  if (!response?.ok) {
+    throw lastError instanceof Error ? lastError : new Error("Gemini API request failed.");
   }
 
   const data = (await response.json()) as {
@@ -278,11 +329,8 @@ function normalizeInterestKeywordOptions(
 async function generateInterestKeywordOptions(
   studentText: string,
 ): Promise<InterestKeywordOption[]> {
-  if (
-    !process.env.AI_INTEGRATIONS_GEMINI_BASE_URL ||
-    !process.env.AI_INTEGRATIONS_GEMINI_API_KEY
-  ) {
-    return fallbackInterestKeywordOptions(studentText);
+  if (!hasGeminiConfig()) {
+    throw new GeminiUnavailableError(geminiErrorMessage("철학 탐구 키워드 생성"));
   }
 
   const prompt = `너는 초등학생을 위한 철학 사서야.
@@ -344,7 +392,8 @@ Return only JSON matching the provided schema.`;
     console.warn("[recommend] Gemini interest keyword generation failed.", {
       message: error instanceof Error ? error.message : String(error),
     });
-    return fallbackInterestKeywordOptions(studentText);
+    if (error instanceof GeminiUnavailableError) throw error;
+    throw new GeminiUnavailableError("Gemini가 철학 탐구 키워드를 만들지 못했어요. API 키와 Gemini 사용 가능 상태를 확인해 주세요.", 502);
   }
 }
 
@@ -1376,14 +1425,8 @@ async function selectAndDescribeBalanced(
   grade: "lower" | "higher",
 ): Promise<{ book: KakaoBook; text: Omit<AiSelection, "selectedIndex"> }> {
   const candidateBooks = books.slice(0, 24);
-  if (
-    !process.env.AI_INTEGRATIONS_GEMINI_BASE_URL ||
-    !process.env.AI_INTEGRATIONS_GEMINI_API_KEY
-  ) {
-    return {
-      book: candidateBooks[0],
-      text: genericBalancedText(candidateBooks[0], grade, context),
-    };
+  if (!hasGeminiConfig()) {
+    throw new GeminiUnavailableError(geminiErrorMessage("추천 도서 설명 생성"));
   }
 
   const bookList = candidateBooks
@@ -1466,10 +1509,8 @@ Return only JSON matching the schema.`;
     console.warn("[recommend] Gemini balanced recommendation failed.", {
       message: error instanceof Error ? error.message : String(error),
     });
-    return {
-      book: candidateBooks[0],
-      text: genericBalancedText(candidateBooks[0], grade, context),
-    };
+    if (error instanceof GeminiUnavailableError) throw error;
+    throw new GeminiUnavailableError("Gemini가 추천 도서 설명을 만들지 못했어요. Gemini API 키, 할당량, 모델 접근 권한을 확인해 주세요.", 502);
   }
 }
 
@@ -1616,23 +1657,8 @@ async function chatWithPhilosopherBalanced({
   const questionType = classifyStudentQuestion(message);
   const repeatedQuestion = hasSimilarWords(message, previousStudentMessage);
 
-  if (
-    !process.env.AI_INTEGRATIONS_GEMINI_BASE_URL ||
-    !process.env.AI_INTEGRATIONS_GEMINI_API_KEY
-  ) {
-    return {
-      philosopherName: personaName,
-      reply: fallbackPhilosopherReplyContextual({
-        philosopherName: personaName,
-        message,
-        grade,
-        bookTitle,
-        philosophicalLens,
-        previousStudentMessage,
-        previousPhilosopherReply,
-        turnIndex: history.length,
-      }),
-    };
+  if (!hasGeminiConfig()) {
+    throw new GeminiUnavailableError(geminiErrorMessage("철학자와 대화하기"));
   }
 
   const historyText = history
@@ -1714,19 +1740,8 @@ Rules:
     console.warn("[recommend] Gemini balanced philosopher chat failed.", {
       message: error instanceof Error ? error.message : String(error),
     });
-    return {
-      philosopherName: personaName,
-      reply: fallbackPhilosopherReplyContextual({
-        philosopherName: personaName,
-        message,
-        grade,
-        bookTitle,
-        philosophicalLens,
-        previousStudentMessage,
-        previousPhilosopherReply,
-        turnIndex: history.length,
-      }),
-    };
+    if (error instanceof GeminiUnavailableError) throw error;
+    throw new GeminiUnavailableError("Gemini가 철학자 답변을 만들지 못했어요. API 키, 할당량, 모델 접근 권한을 확인해 주세요.", 502);
   }
 }
 
@@ -1740,8 +1755,13 @@ router.post("/recommend/interest-keywords", async (req, res): Promise<void> => {
     return;
   }
 
-  const keywords = await generateInterestKeywordOptions(parsed.data.text);
-  res.json({ keywords });
+  try {
+    const keywords = await generateInterestKeywordOptions(parsed.data.text);
+    res.json({ keywords, aiSource: "gemini" });
+  } catch (error) {
+    if (sendGeminiError(res, error)) return;
+    throw error;
+  }
 });
 
 router.post("/recommend/by-keyword", async (req, res): Promise<void> => {
@@ -1773,14 +1793,24 @@ router.post("/recommend/by-keyword", async (req, res): Promise<void> => {
     return;
   }
 
-  const { book, text: aiText } = await selectAndDescribeBalanced(context, books, grade);
+  let selected;
+  try {
+    selected = await selectAndDescribeBalanced(context, books, grade);
+  } catch (error) {
+    if (sendGeminiError(res, error)) return;
+    throw error;
+  }
+  const { book, text: aiText } = selected;
 
   res.json(
-    buildRecommendationPayload(book, aiText, {
+    {
+      ...buildRecommendationPayload(book, aiText, {
       selectedKeyword: keyword,
       sourceInterest: originalText ?? null,
       candidateCount: books.length,
-    }),
+      }),
+      aiSource: "gemini",
+    },
   );
 });
 
@@ -1804,20 +1834,26 @@ router.post("/recommend/philosopher-chat", async (req, res): Promise<void> => {
     philosophicalLens,
   } = parsed.data;
   const grade = gradeGroup === "lower" ? "lower" : "higher";
-  const reply = await chatWithPhilosopherBalanced({
-    message,
-    history,
-    grade,
-    bookTitle,
-    bookAuthor,
-    philosophyKnowledge,
-    recommendationReason,
-    thinkingQuestion,
-    philosopherName,
-    philosophicalLens,
-  });
+  let reply;
+  try {
+    reply = await chatWithPhilosopherBalanced({
+      message,
+      history,
+      grade,
+      bookTitle,
+      bookAuthor,
+      philosophyKnowledge,
+      recommendationReason,
+      thinkingQuestion,
+      philosopherName,
+      philosophicalLens,
+    });
+  } catch (error) {
+    if (sendGeminiError(res, error)) return;
+    throw error;
+  }
 
-  res.json(reply);
+  res.json({ ...reply, aiSource: "gemini" });
 });
 
 router.post("/recommend/by-text", async (req, res): Promise<void> => {
@@ -1851,14 +1887,24 @@ router.post("/recommend/by-text", async (req, res): Promise<void> => {
   }
 
   // STEP 3: AI picks the best book from the real results + writes text
-  const { book, text: aiText } = await selectAndDescribeBalanced(context, books, grade);
+  let selected;
+  try {
+    selected = await selectAndDescribeBalanced(context, books, grade);
+  } catch (error) {
+    if (sendGeminiError(res, error)) return;
+    throw error;
+  }
+  const { book, text: aiText } = selected;
 
   res.json(
-    buildRecommendationPayload(book, aiText, {
-      selectedKeyword: mode === "interest" ? keywords[0] : undefined,
-      sourceInterest: mode === "interest" ? text : undefined,
-      candidateCount: books.length,
-    }),
+    {
+      ...buildRecommendationPayload(book, aiText, {
+        selectedKeyword: mode === "interest" ? keywords[0] : undefined,
+        sourceInterest: mode === "interest" ? text : undefined,
+        candidateCount: books.length,
+      }),
+      aiSource: "gemini",
+    },
   );
 });
 
@@ -1937,15 +1983,25 @@ router.post("/recommend/by-image", async (req, res): Promise<void> => {
   }
 
   // STEP 4: AI picks best book + writes text
-  const { book, text: aiText } = await selectAndDescribeBalanced(imageContext, books, grade);
+  let selected;
+  try {
+    selected = await selectAndDescribeBalanced(imageContext, books, grade);
+  } catch (error) {
+    if (sendGeminiError(res, error)) return;
+    throw error;
+  }
+  const { book, text: aiText } = selected;
 
   res.json(
-    buildRecommendationPayload(book, aiText, {
-      detectedBook,
-      selectedKeyword: allKeywords[0],
-      sourceInterest: detectedBook,
-      candidateCount: books.length,
-    }),
+    {
+      ...buildRecommendationPayload(book, aiText, {
+        detectedBook,
+        selectedKeyword: allKeywords[0],
+        sourceInterest: detectedBook,
+        candidateCount: books.length,
+      }),
+      aiSource: "gemini",
+    },
   );
 });
 
