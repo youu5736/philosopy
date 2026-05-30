@@ -3,7 +3,7 @@ services:
     name: mindful-philosopher
     runtime: node
     plan: free
-    buildCommand: corepack enable && pnpm install --no-frozen-lockfile && PORT=8080 BASE_PATH=/ pnpm run build:replit
+    buildCommand: corepack enable && pnpm install --no-frozen-lockfile --ignore-scripts && PORT=8080 BASE_PATH=/ pnpm run build:replit
     startCommand: pnpm run start
     healthCheckPath: /
     envVars:
