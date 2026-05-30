@@ -1457,11 +1457,12 @@ Quality rules:
 - Choose a book that can become a philosophy conversation, not merely a fun or informational match.
 - Prefer books whose title or description clearly invites questions about values, responsibility, freedom, justice, identity, mind, relationship, emotion, or existence.
 - If a candidate is mainly science/information, choose it only when its description clearly supports a philosophical question.
-- Recommendation reason must mention the student interest, selected keyword if present, the chosen book title/description, and one concrete philosophical connection.
+- Recommendation reason must sound like a friendly elementary teacher, not an academic report or bibliography.
+- Recommendation reason must be 2-3 warm Korean sentences. Mention the chosen book and one concrete philosophical connection, but do not list publication metadata, series details, volume numbers, or citation-like facts.
 - philosophyKnowledge must explicitly include either a philosopher name or a clear philosophical concept connected to a scene or idea in the chosen book.
 - philosopherName must be one stable persona that fits the recommendation.
 - philosophicalLens must be a short concept phrase only, such as "기술 윤리", "마음과 정체성", "관계와 책임", "감정과 자유", or "우주와 존재".
-- thinkingQuestion must be an open philosophical question for the student.
+- thinkingQuestion must be one friendly, topic-specific question that directly matches the student interest and chosen book. It must not use a generic "what do I want to protect?" template unless the topic is actually about values or responsibility.
 - For lower grades, write simple and concrete Korean. For upper grades, use one easy concept word but stay elementary-student friendly.
 
 Return only JSON matching the schema.`;
@@ -1585,9 +1586,10 @@ function safePhilosopherReplyContextual({
   const context = `${message} ${bookTitle} ${lens}`;
   const isSpace = /우주|별|행성|지구|하늘|세계|세상|은하/.test(context);
   const isRobot = /로봇|인공지능|AI|기계|마음/.test(context);
-  const isFeeling = /화|슬픔|기쁨|외로움|친구|관계/.test(context);
+  const isFeeling = /화|슬픔|기쁨|외로움|친구|관계|허무|불안|무서|두려|작은 점|작다/.test(context);
   const asksSize = /얼마나|크기|큰가|넓|끝/.test(message);
   const asksWorld = /어떤|무슨|세상|세계|곳/.test(message);
+  const isSpaceFeeling = isSpace && /허무|불안|무서|두려|외로|작은 점|작다|작은/.test(message);
   const followup = /그럼|그러면|그래서|아까|또|다시/.test(message) || hasSimilarWords(message, previousStudentMessage);
   const contrast =
     previousStudentMessage && followup
@@ -1600,6 +1602,9 @@ function safePhilosopherReplyContextual({
     }
     if (isSpace && asksWorld) {
       return `${contrast}${philosopherName}라면 우주는 별과 행성만 있는 곳이 아니라, 우리가 어디에서 왔는지 묻게 하는 큰 세상이라고 말할 거야. ${lens}로 보면 중요한 건 정답 하나보다 "나는 이 넓은 세상에서 무엇이 궁금하지?"를 찾아보는 일이야.`;
+    }
+    if (isSpaceFeeling) {
+      return `${contrast}${philosopherName}라면 우주가 너무 넓어서 우리가 작게 느껴질 수 있다고 말할 거야. 하지만 작은 점처럼 보여도 너의 질문과 마음은 사라지지 않아. 오히려 "작아도 소중한 것은 무엇일까?"를 생각해 볼 수 있어.`;
     }
     if (isRobot) {
       return `${contrast}${philosopherName}라면 로봇이 사람과 같다고 바로 말하기 전에, 스스로 고르고 책임질 수 있는지 물어볼 거야. 《${bookTitle}》과 이어 보면 마음, 선택, 책임을 나누어 생각해 볼 수 있어.`;
@@ -1616,6 +1621,9 @@ function safePhilosopherReplyContextual({
   if (isSpace && asksWorld) {
     return `${contrast}${philosopherName}라면 우주는 물질이 모인 공간이면서 동시에 우리가 존재의 의미를 묻게 하는 세계라고 말할 거야. 존재란 "무언가가 있다"는 뜻이야. ${lens}로 보면 이 질문은 우주가 어떤 곳인지뿐 아니라, 그 안에서 우리는 어떤 존재인지 묻는 질문이 돼.`;
   }
+  if (isSpaceFeeling) {
+    return `${contrast}${philosopherName}라면 우주 앞에서 허무함을 느끼는 건 이상한 일이 아니라고 할 거야. 다만 존재라는 말은 "내가 여기 있다"는 사실도 함께 보자는 뜻이야. 우리가 작아 보여도 질문하고 사랑하고 선택하는 삶은 여전히 의미를 만들 수 있어.`;
+  }
   if (isRobot) {
     return `${contrast}${philosopherName}라면 로봇을 사람처럼 볼 기준이 무엇인지 먼저 세우자고 할 거야. 감정, 선택, 책임 중 무엇을 중요하게 보느냐에 따라 답이 달라질 수 있어.`;
   }
@@ -1623,6 +1631,24 @@ function safePhilosopherReplyContextual({
     return `${contrast}${philosopherName}라면 감정은 틀린 것이 아니라 우리가 무엇을 소중히 여기는지 알려주는 신호라고 볼 거야. 중요한 건 그 감정을 어떤 선택으로 이어갈지 생각하는 일이야.`;
   }
   return `${contrast}${philosopherName}라면 이 질문에서 판단의 기준을 먼저 찾자고 할 거야. 《${bookTitle}》과 연결하면 ${lens}라는 관점으로 이유와 반례를 함께 생각해 볼 수 있어.`;
+}
+
+function isTooSimilarReply(reply: string, previousReply: string): boolean {
+  const normalize = (value: string) =>
+    value
+      .replace(/\s+/g, " ")
+      .replace(/[^\p{L}\p{N} ]/gu, "")
+      .trim();
+  const current = normalize(reply);
+  const previous = normalize(previousReply);
+  if (!current || !previous) return false;
+  if (current.slice(0, 28) === previous.slice(0, 28)) return true;
+
+  const currentWords = new Set(current.split(" ").filter((word) => word.length >= 2));
+  const previousWords = previous.split(" ").filter((word) => word.length >= 2);
+  if (previousWords.length < 8) return false;
+  const overlap = previousWords.filter((word) => currentWords.has(word)).length;
+  return overlap / previousWords.length > 0.62;
 }
 
 function genericBalancedText(
@@ -1674,6 +1700,16 @@ function genericBalancedText(
               };
 
   const keywordPhrase = keyword ? `, 특히 "${keyword}"라는 탐구 키워드` : "";
+  const thinkingQuestion =
+    /우주|별|행성|지구|세계|세상|하늘|은하/.test(haystack)
+      ? "우주처럼 아주 넓은 세계를 생각할 때, 나는 무엇을 더 알고 싶나요? 그 궁금함은 내가 사는 하루와 어떻게 이어질까요?"
+      : /로봇|인공지능|AI|기계|기술/.test(haystack)
+        ? "로봇이나 기술을 생각할 때, 우리는 무엇을 사람답게 대해야 할까요? 그리고 그 기준은 왜 중요할까요?"
+        : /친구|관계|마음|외로움|화|분노|감정/.test(haystack)
+          ? "내 마음이나 친구와의 관계를 생각할 때, 나는 무엇을 먼저 살펴보고 싶나요? 그 선택은 다른 사람의 마음에도 도움이 될까요?"
+          : /역사|옛날|전쟁|나라|왕|인물/.test(haystack)
+            ? "역사 속 사람들의 선택을 볼 때, 나는 어떤 기준으로 옳고 그름을 생각해 보고 싶나요?"
+            : `${source}에 대해 생각할 때, 나는 어떤 질문을 가장 먼저 붙잡고 싶나요? 그 질문은 내 생활과 어떻게 이어질까요?`;
   const easyEnding =
     grade === "lower"
       ? "친구가 읽기에도 장면을 따라가며 생각하기 좋아요"
@@ -1683,7 +1719,7 @@ function genericBalancedText(
     empathyMessage: `${source}에 마음이 갔다는 건, 세상을 그냥 지나치지 않고 더 알고 싶어 한다는 뜻이에요. 그 궁금함은 아주 좋은 철학의 시작이에요.`,
     recommendationReason: `${source}${keywordPhrase}와 연결해서는 《${title}》이 잘 맞아요. ${author}의 이 책은 "${description}" 같은 내용을 바탕으로, ${lens.philosophicalLens}라는 생각 렌즈를 자연스럽게 떠올리게 해요. 그래서 단순히 주제를 아는 데서 끝나지 않고 ${easyEnding}.`,
     philosophyKnowledge: `${lens.concept}. 《${title}》을 읽을 때도 책 속 인물이나 장면을 보며 "이 선택은 누구에게 도움이 될까?", "다르게 생각하면 무엇이 달라질까?"처럼 물어볼 수 있어요. 그런 질문이 이 책을 작은 철학 대화로 바꾸어 줍니다.`,
-    thinkingQuestion: `${source}에 대해 생각할 때, 나는 무엇을 가장 소중하게 지키고 싶나요? 그리고 그 생각은 다른 사람에게도 괜찮은 기준이 될까요?`,
+    thinkingQuestion,
     philosopherName: lens.philosopherName,
     philosophicalLens: lens.philosophicalLens,
   };
@@ -1778,6 +1814,8 @@ Rules:
 - Do not reuse the previous reply's opening, sentence structure, final question, or conclusion.
 - Connect to the book and philosophical lens only where it fits the student's actual question.
 - Stay in the persona of ${personaName}, but do not overact or lecture.
+- Keep a friendly teacher tone. Avoid stiff wording like "판단의 기준을 먼저 찾고", "과학적으로 이유와 반례", or citation-like book explanations unless the student is old enough and it is necessary.
+- If the student asks a casual or broad question, answer naturally first, then add one simple philosophical idea.
 - Ask at most one short follow-up question, and only if it is different from previous replies.
 - ${grade === "lower"
     ? "For grades 1-3: use 2-3 short sentences, everyday examples like friends/classroom/home, no hard terms unless immediately explained."
@@ -1795,19 +1833,23 @@ Rules:
       required: ["philosopherName", "reply"],
     });
     const parsed = parseModelJson<{ philosopherName?: string; reply?: string }>(text);
+    const modelReply = parsed.reply?.trim();
+    const fallbackReply = safePhilosopherReplyContextual({
+      philosopherName: personaName,
+      message,
+      grade,
+      bookTitle,
+      philosophicalLens,
+      previousStudentMessage,
+    });
+    const reply =
+      modelReply && !isTooSimilarReply(modelReply, previousPhilosopherReply)
+        ? modelReply
+        : fallbackReply;
     return {
       philosopherName: parsed.philosopherName?.trim() || personaName,
-      reply:
-        parsed.reply?.trim() ||
-        safePhilosopherReplyContextual({
-          philosopherName: personaName,
-          message,
-          grade,
-          bookTitle,
-          philosophicalLens,
-          previousStudentMessage,
-        }),
-      aiSource: parsed.reply?.trim() ? "gemini" : "fallback",
+      reply,
+      aiSource: reply === modelReply ? "gemini" : "fallback",
     };
   } catch (error) {
     console.warn("[recommend] Gemini balanced philosopher chat failed.", {

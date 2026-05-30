@@ -592,8 +592,8 @@ export default function RecommendPage() {
             </div>
 
             <Dialog open={chatOpen} onOpenChange={setChatOpen}>
-              <DialogContent className="max-h-[86dvh] max-w-2xl rounded-3xl p-0 overflow-hidden">
-                <DialogHeader className="border-b bg-amber-50 px-6 py-5">
+              <DialogContent className="flex h-[88dvh] max-h-[760px] max-w-2xl flex-col rounded-3xl p-0 overflow-hidden">
+                <DialogHeader className="shrink-0 border-b bg-amber-50 px-6 py-5">
                   <DialogTitle className="flex items-center gap-2 text-2xl font-display text-amber-950">
                     <UserRound className="h-6 w-6" />
                     {philosopherName || result.philosopherName
@@ -605,8 +605,8 @@ export default function RecommendPage() {
                   </DialogDescription>
                 </DialogHeader>
 
-                <div className="flex min-h-[520px] flex-col bg-background">
-                  <ScrollArea className="flex-1 px-6 py-5">
+                <div className="flex min-h-0 flex-1 flex-col bg-background">
+                  <ScrollArea className="min-h-0 flex-1 px-6 py-5">
                     <div className="space-y-4 pr-3">
                       {chatMessages.length === 0 && (
                         <div className="rounded-3xl border border-amber-200 bg-amber-50 p-5 text-amber-950">
@@ -653,7 +653,7 @@ export default function RecommendPage() {
                     </div>
                   </ScrollArea>
 
-                  <div className="border-t bg-white p-4">
+                  <div className="shrink-0 border-t bg-white p-4">
                     <div className="flex flex-col gap-3 sm:flex-row">
                       <Textarea
                         value={chatInput}
