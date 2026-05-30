@@ -726,6 +726,11 @@ function fallbackKeywords(
     }
   }
   // emotion mode (original)
+  if (/학교|수업|학원|공부|등교/.test(text) && /피곤|지쳐|힘들|졸려|가기 싫|귀찮/.test(text)) {
+    return grade === "lower"
+      ? ["학교 피곤 마음 그림책", "쉬고 싶은 마음 동화", "마음 건강 철학동화"]
+      : ["학교 피곤 마음 철학", "휴식과 자기이해 어린이", "마음 건강 인문학"];
+  }
   if (grade === "lower") {
     if (/친구|싸움|질투|속상/.test(text)) return ["초등 철학동화", "생각하는 그림책"];
     if (/틀리|실수|불안|용기/.test(text)) return ["어린이 인성 동화", "초등 용기 철학동화"];
@@ -1422,12 +1427,13 @@ async function selectAndDescribeBalanced(
   context: RecommendationContext,
   books: KakaoBook[],
   grade: "lower" | "higher",
-): Promise<{ book: KakaoBook; text: Omit<AiSelection, "selectedIndex"> }> {
+): Promise<{ book: KakaoBook; text: Omit<AiSelection, "selectedIndex">; aiSource: "gemini" | "fallback" }> {
   const candidateBooks = books.slice(0, 24);
   if (!hasGeminiConfig()) {
     return {
       book: candidateBooks[0],
-      text: genericBalancedText(candidateBooks[0], grade, context),
+      text: friendlyFallbackText(candidateBooks[0], grade, context),
+      aiSource: "fallback",
     };
   }
 
@@ -1459,6 +1465,8 @@ Quality rules:
 - If a candidate is mainly science/information, choose it only when its description clearly supports a philosophical question.
 - Recommendation reason must sound like a friendly elementary teacher, not an academic report or bibliography.
 - Recommendation reason must be 2-3 warm Korean sentences. Mention the chosen book and one concrete philosophical connection, but do not list publication metadata, series details, volume numbers, or citation-like facts.
+- If search mode is "emotion", every field must answer the student's feeling first. Do not drift to space/science/history unless the student's feeling explicitly mentions that topic.
+- If the student says they are tired, bored, anxious, sad, angry, or lonely, connect the book to that feeling and self-understanding.
 - philosophyKnowledge must explicitly include either a philosopher name or a clear philosophical concept connected to a scene or idea in the chosen book.
 - philosopherName must be one stable persona that fits the recommendation.
 - philosophicalLens must be a short concept phrase only, such as "기술 윤리", "마음과 정체성", "관계와 책임", "감정과 자유", or "우주와 존재".
@@ -1468,27 +1476,32 @@ Quality rules:
 Return only JSON matching the schema.`;
 
   try {
-    const text = await generateGeminiText([{ text: prompt }], 4096, true, {
-      type: "OBJECT",
-      properties: {
-        selectedIndex: { type: "INTEGER" },
-        empathyMessage: { type: "STRING" },
-        recommendationReason: { type: "STRING" },
-        philosophyKnowledge: { type: "STRING" },
-        thinkingQuestion: { type: "STRING" },
-        philosopherName: { type: "STRING" },
-        philosophicalLens: { type: "STRING" },
-      },
-      required: [
-        "selectedIndex",
-        "empathyMessage",
-        "recommendationReason",
-        "philosophyKnowledge",
-        "thinkingQuestion",
-        "philosopherName",
-        "philosophicalLens",
-      ],
-    });
+    let text: string;
+    try {
+      text = await generateGeminiText([{ text: prompt }], 4096, true, {
+        type: "OBJECT",
+        properties: {
+          selectedIndex: { type: "INTEGER" },
+          empathyMessage: { type: "STRING" },
+          recommendationReason: { type: "STRING" },
+          philosophyKnowledge: { type: "STRING" },
+          thinkingQuestion: { type: "STRING" },
+          philosopherName: { type: "STRING" },
+          philosophicalLens: { type: "STRING" },
+        },
+        required: [
+          "selectedIndex",
+          "empathyMessage",
+          "recommendationReason",
+          "philosophyKnowledge",
+          "thinkingQuestion",
+          "philosopherName",
+          "philosophicalLens",
+        ],
+      });
+    } catch {
+      text = await generateGeminiText([{ text: prompt }], 4096, true);
+    }
     const result = parseModelJson<AiSelection>(text);
     const idx =
       Number.isInteger(result.selectedIndex) &&
@@ -1497,16 +1510,21 @@ Return only JSON matching the schema.`;
         ? result.selectedIndex
         : 0;
 
-    return {
-      book: candidateBooks[idx],
-      text: {
+    const book = candidateBooks[idx];
+    const aiText = {
         empathyMessage: result.empathyMessage,
         recommendationReason: result.recommendationReason,
         thinkingQuestion: result.thinkingQuestion,
         philosophyKnowledge: result.philosophyKnowledge,
         philosopherName: result.philosopherName,
         philosophicalLens: result.philosophicalLens,
-      },
+      };
+    return {
+      book,
+      text: needsRecommendationRepair(aiText, context, book)
+        ? friendlyFallbackText(book, grade, context)
+        : aiText,
+      aiSource: needsRecommendationRepair(aiText, context, book) ? "fallback" : "gemini",
     };
   } catch (error) {
     console.warn("[recommend] Gemini balanced recommendation failed.", {
@@ -1514,7 +1532,8 @@ Return only JSON matching the schema.`;
     });
     return {
       book: candidateBooks[0],
-      text: genericBalancedText(candidateBooks[0], grade, context),
+      text: friendlyFallbackText(candidateBooks[0], grade, context),
+      aiSource: "fallback",
     };
   }
 }
@@ -1649,6 +1668,84 @@ function isTooSimilarReply(reply: string, previousReply: string): boolean {
   if (previousWords.length < 8) return false;
   const overlap = previousWords.filter((word) => currentWords.has(word)).length;
   return overlap / previousWords.length > 0.62;
+}
+
+function isSpaceTopic(text: string): boolean {
+  return /우주|별|행성|은하|로켓|천문|지구 밖|외계/.test(text);
+}
+
+function isSchoolFatigueTopic(text: string): boolean {
+  return /학교|수업|학원|공부|등교/.test(text) && /피곤|지쳐|힘들|졸려|가기 싫|귀찮/.test(text);
+}
+
+function friendlyFallbackText(
+  book: KakaoBook,
+  grade: "lower" | "higher",
+  context: RecommendationContext,
+): Omit<AiSelection, "selectedIndex"> {
+  const title = book.title.replace(/<[^>]+>/g, "").trim();
+  const source = context.sourceText.trim() || context.selectedKeyword || title;
+  const keyword = context.selectedKeyword?.trim();
+  const haystack = `${source} ${keyword ?? ""} ${title} ${book.contents ?? ""}`;
+  const lower = grade === "lower";
+
+  if (context.searchMode === "emotion" && isSchoolFatigueTopic(source)) {
+    return {
+      empathyMessage: "학교에 가는 일이 자꾸 피곤하게 느껴진다면, 몸과 마음이 쉬고 싶다는 신호일 수 있어요. 그 마음을 그냥 넘기지 않고 말해 본 것부터 아주 좋은 시작이에요.",
+      recommendationReason: `《${title}》은 네가 느끼는 피곤함을 혼자 참아야 하는 문제로만 보지 않게 도와줄 수 있어요. 책 속 장면을 따라가며 내 마음이 언제 지치고, 무엇이 나를 다시 힘나게 하는지 생각해 보기 좋아요.`,
+      philosophyKnowledge: lower
+        ? "스피노자는 마음을 잘 이해하면 그 마음에 덜 끌려다닐 수 있다고 보았어요. 피곤하다는 마음도 잘못된 게 아니라, 나를 돌봐 달라는 작은 신호일 수 있어요."
+        : "스피노자는 감정을 억지로 없애기보다 그 까닭을 이해하는 일이 중요하다고 보았어요. 피곤함을 이해하면 무조건 참기보다 쉬기, 도움 요청하기, 생활을 조정하기 같은 선택을 생각해 볼 수 있습니다.",
+      thinkingQuestion: "학교에 갈 때 몸과 마음이 피곤하다고 느껴진다면, 나는 무엇을 먼저 돌봐야 할까요?",
+      philosopherName: "스피노자",
+      philosophicalLens: "몸과 마음의 돌봄",
+    };
+  }
+
+  if (context.searchMode === "emotion") {
+    return {
+      empathyMessage: "그 마음을 그냥 넘기지 않고 말해 준 건 아주 중요해요. 감정은 나를 힘들게만 하는 것이 아니라, 내가 무엇을 필요로 하는지 알려주는 신호가 될 수 있어요.",
+      recommendationReason: `《${title}》은 지금 느끼는 마음을 조금 떨어져 바라보게 도와줄 수 있어요. 책 속 인물의 선택과 감정을 보며 내 마음도 천천히 이름 붙여 볼 수 있습니다.`,
+      philosophyKnowledge: lower
+        ? "철학은 어려운 말만 하는 것이 아니라, 내 마음을 차분히 들여다보는 일이기도 해요. 왜 이런 마음이 생겼는지 묻는 순간부터 생각이 시작돼요."
+        : "감정을 이해한다는 것은 그 감정에 바로 끌려가지 않고 이유를 살피는 일이에요. 그 과정에서 내가 원하는 것, 두려워하는 것, 지키고 싶은 것을 더 분명히 알 수 있습니다.",
+      thinkingQuestion: "이 마음은 나에게 무엇을 알려주려고 온 걸까요?",
+      philosopherName: "스피노자",
+      philosophicalLens: "감정과 자기이해",
+    };
+  }
+
+  if (isSpaceTopic(haystack)) {
+    return {
+      empathyMessage: `${source}에 궁금함이 생겼다는 건, 아주 큰 세계를 그냥 지나치지 않고 생각해 보고 싶다는 뜻이에요.`,
+      recommendationReason: `《${title}》은 우주를 단순한 지식이 아니라 "나는 이 넓은 세계 안에서 어떤 존재일까?"라는 질문으로 이어 가게 도와줄 수 있어요.`,
+      philosophyKnowledge: "소크라테스는 큰 질문 앞에서 먼저 내가 무엇을 알고 모르는지 살피는 일이 중요하다고 보았어요. 우주를 생각할 때도 바로 정답을 찾기보다 궁금함을 잘 붙잡는 것이 철학의 시작입니다.",
+      thinkingQuestion: "우주처럼 아주 넓은 세계를 생각할 때, 나는 무엇을 더 알고 싶나요?",
+      philosopherName: "소크라테스",
+      philosophicalLens: "우주와 존재",
+    };
+  }
+
+  return {
+    empathyMessage: `${source}에 관심이 간다는 건 그 주제를 더 깊이 생각해 보고 싶다는 뜻이에요.`,
+    recommendationReason: `《${title}》은 ${source}라는 관심을 책 속 장면과 연결해 스스로 질문해 보게 도와줄 수 있어요.`,
+    philosophyKnowledge: "소크라테스는 정답을 빨리 말하기보다 왜 그렇게 생각하는지 묻는 일을 중요하게 여겼어요. 책을 읽으며 떠오른 질문을 붙잡으면 작은 철학 대화가 시작됩니다.",
+    thinkingQuestion: `${source}에 대해 생각할 때, 나는 어떤 질문을 가장 먼저 해 보고 싶나요?`,
+    philosopherName: "소크라테스",
+    philosophicalLens: "질문과 생각",
+  };
+}
+
+function needsRecommendationRepair(text: Omit<AiSelection, "selectedIndex">, context: RecommendationContext, book: KakaoBook): boolean {
+  const source = context.sourceText;
+  const bookText = `${book.title} ${book.contents ?? ""}`;
+  const combined = `${text.empathyMessage} ${text.recommendationReason} ${text.philosophyKnowledge} ${text.thinkingQuestion} ${text.philosophicalLens ?? ""}`;
+  const inputIsSpace = isSpaceTopic(`${source} ${context.selectedKeyword ?? ""}`);
+  const outputIsSpace = isSpaceTopic(combined);
+  const bookIsOnlyBroadWorld = /세계/.test(bookText) && !isSpaceTopic(bookText);
+  const hasBibliographyTone = /HardCover|양장본|출판사|시리즈|[0-9]+권|한국아동문학|우수도서|저자|작가/.test(combined);
+  const emotionDrift = context.searchMode === "emotion" && outputIsSpace && (!inputIsSpace || bookIsOnlyBroadWorld);
+  return emotionDrift || hasBibliographyTone;
 }
 
 function genericBalancedText(
@@ -1934,7 +2031,7 @@ router.post("/recommend/by-keyword", async (req, res): Promise<void> => {
       sourceInterest: originalText ?? null,
       candidateCount: books.length,
       }),
-      aiSource: "gemini",
+      aiSource: selected.aiSource,
     },
   );
 });
@@ -2028,7 +2125,7 @@ router.post("/recommend/by-text", async (req, res): Promise<void> => {
         sourceInterest: mode === "interest" ? text : undefined,
         candidateCount: books.length,
       }),
-      aiSource: "gemini",
+      aiSource: selected.aiSource,
     },
   );
 });
@@ -2125,7 +2222,7 @@ router.post("/recommend/by-image", async (req, res): Promise<void> => {
         sourceInterest: detectedBook,
         candidateCount: books.length,
       }),
-      aiSource: "gemini",
+      aiSource: selected.aiSource,
     },
   );
 });
