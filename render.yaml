@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: mindful-philosopher
+    runtime: node
+    plan: free
+    buildCommand: corepack enable && pnpm install --frozen-lockfile && pnpm run build:replit
+    startCommand: pnpm run start
+    healthCheckPath: /
+    envVars:
+      - key: NODE_VERSION
+        value: 22
+      - key: AI_INTEGRATIONS_GEMINI_BASE_URL
+        value: https://generativelanguage.googleapis.com/v1beta
+      - key: KAKAO_API_KEY
+        sync: false
+      - key: AI_INTEGRATIONS_GEMINI_API_KEY
+        sync: false
