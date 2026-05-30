@@ -444,7 +444,7 @@ async function chatWithPhilosopher({
   philosophyKnowledge?: string | null;
   recommendationReason?: string;
   thinkingQuestion?: string;
-}): Promise<{ philosopherName: string; reply: string }> {
+}): Promise<{ philosopherName: string; reply: string; aiSource: "gemini" | "fallback" }> {
   const philosopherName = inferPhilosopherName(philosophyKnowledge);
 
   if (
@@ -1566,6 +1566,65 @@ function fallbackPhilosopherReplyContextual({
   return `${philosopherName}라면 네 질문에서 ${lens}의 기준을 먼저 찾으려 할 거야. ${bookTitle}과 이어 보면, 중요한 건 정답 하나가 아니라 어떤 이유로 그렇게 판단하는지야. 초등학생에게도 철학은 바로 이런 기준을 천천히 세워 보는 일이야.`;
 }
 
+function safePhilosopherReplyContextual({
+  philosopherName,
+  message,
+  grade,
+  bookTitle,
+  philosophicalLens,
+  previousStudentMessage = "",
+}: {
+  philosopherName: string;
+  message: string;
+  grade: "lower" | "higher";
+  bookTitle: string;
+  philosophicalLens?: string | null;
+  previousStudentMessage?: string;
+}): string {
+  const lens = philosophicalLens || "질문과 생각";
+  const context = `${message} ${bookTitle} ${lens}`;
+  const isSpace = /우주|별|행성|지구|하늘|세계|세상|은하/.test(context);
+  const isRobot = /로봇|인공지능|AI|기계|마음/.test(context);
+  const isFeeling = /화|슬픔|기쁨|외로움|친구|관계/.test(context);
+  const asksSize = /얼마나|크기|큰가|넓|끝/.test(message);
+  const asksWorld = /어떤|무슨|세상|세계|곳/.test(message);
+  const followup = /그럼|그러면|그래서|아까|또|다시/.test(message) || hasSimilarWords(message, previousStudentMessage);
+  const contrast =
+    previousStudentMessage && followup
+      ? `아까는 "${compactText(previousStudentMessage, 40)}"라고 물었고, 지금은 조금 다른 쪽을 보고 있어. `
+      : "";
+
+  if (grade === "lower") {
+    if (isSpace && asksSize) {
+      return `${contrast}${philosopherName}라면 우주는 숫자 하나로 딱 잡기 어려울 만큼 아주 넓다고 말할 거야. 《${bookTitle}》을 떠올리며, "끝을 모를 만큼 큰 것을 우리는 어떻게 상상할까?" 하고 물어볼 수 있어.`;
+    }
+    if (isSpace && asksWorld) {
+      return `${contrast}${philosopherName}라면 우주는 별과 행성만 있는 곳이 아니라, 우리가 어디에서 왔는지 묻게 하는 큰 세상이라고 말할 거야. ${lens}로 보면 중요한 건 정답 하나보다 "나는 이 넓은 세상에서 무엇이 궁금하지?"를 찾아보는 일이야.`;
+    }
+    if (isRobot) {
+      return `${contrast}${philosopherName}라면 로봇이 사람과 같다고 바로 말하기 전에, 스스로 고르고 책임질 수 있는지 물어볼 거야. 《${bookTitle}》과 이어 보면 마음, 선택, 책임을 나누어 생각해 볼 수 있어.`;
+    }
+    if (isFeeling) {
+      return `${contrast}${philosopherName}라면 그 마음을 없애라고 하기보다 먼저 왜 그런 마음이 왔는지 살펴보자고 할 거야. 친구나 학교에서 있었던 일처럼 가까운 예를 떠올리면 생각하기 쉬워져.`;
+    }
+    return `${contrast}${philosopherName}라면 바로 답을 정하기보다, 네 질문에서 가장 중요한 낱말을 먼저 찾아보자고 할 거야. 《${bookTitle}》과 연결해서 보면 ${lens}라는 생각으로 천천히 물어볼 수 있어.`;
+  }
+
+  if (isSpace && asksSize) {
+    return `${contrast}${philosopherName}라면 우주의 크기는 단순한 숫자 문제가 아니라 "우리가 알 수 있는 것의 한계"를 묻는 질문이라고 볼 거야. 여기서 기준은 어떤 것을 판단할 때 세우는 잣대라는 뜻이야. 《${bookTitle}》과 이어 보면, 아주 큰 세계를 만났을 때 사람은 어떤 기준으로 이해하려 하는지 생각해 볼 수 있어.`;
+  }
+  if (isSpace && asksWorld) {
+    return `${contrast}${philosopherName}라면 우주는 물질이 모인 공간이면서 동시에 우리가 존재의 의미를 묻게 하는 세계라고 말할 거야. 존재란 "무언가가 있다"는 뜻이야. ${lens}로 보면 이 질문은 우주가 어떤 곳인지뿐 아니라, 그 안에서 우리는 어떤 존재인지 묻는 질문이 돼.`;
+  }
+  if (isRobot) {
+    return `${contrast}${philosopherName}라면 로봇을 사람처럼 볼 기준이 무엇인지 먼저 세우자고 할 거야. 감정, 선택, 책임 중 무엇을 중요하게 보느냐에 따라 답이 달라질 수 있어.`;
+  }
+  if (isFeeling) {
+    return `${contrast}${philosopherName}라면 감정은 틀린 것이 아니라 우리가 무엇을 소중히 여기는지 알려주는 신호라고 볼 거야. 중요한 건 그 감정을 어떤 선택으로 이어갈지 생각하는 일이야.`;
+  }
+  return `${contrast}${philosopherName}라면 이 질문에서 판단의 기준을 먼저 찾자고 할 거야. 《${bookTitle}》과 연결하면 ${lens}라는 관점으로 이유와 반례를 함께 생각해 볼 수 있어.`;
+}
+
 function genericBalancedText(
   book: KakaoBook,
   grade: "lower" | "higher",
@@ -1652,7 +1711,7 @@ async function chatWithPhilosopherBalanced({
   thinkingQuestion?: string;
   philosopherName?: string | null;
   philosophicalLens?: string | null;
-}): Promise<{ philosopherName: string; reply: string }> {
+}): Promise<{ philosopherName: string; reply: string; aiSource: "gemini" | "fallback" }> {
   const personaName =
     philosopherName?.trim() ||
     cleanPhilosopherName(`${philosophicalLens ?? ""} ${philosophyKnowledge ?? ""}`);
@@ -1664,16 +1723,15 @@ async function chatWithPhilosopherBalanced({
   if (!hasGeminiConfig()) {
     return {
       philosopherName: personaName,
-      reply: fallbackPhilosopherReplyContextual({
+      reply: safePhilosopherReplyContextual({
         philosopherName: personaName,
         message,
         grade,
         bookTitle,
         philosophicalLens,
         previousStudentMessage,
-        previousPhilosopherReply,
-        turnIndex: history.length,
       }),
+      aiSource: "fallback",
     };
   }
 
@@ -1741,16 +1799,15 @@ Rules:
       philosopherName: parsed.philosopherName?.trim() || personaName,
       reply:
         parsed.reply?.trim() ||
-        fallbackPhilosopherReplyContextual({
+        safePhilosopherReplyContextual({
           philosopherName: personaName,
           message,
           grade,
           bookTitle,
           philosophicalLens,
           previousStudentMessage,
-          previousPhilosopherReply,
-          turnIndex: history.length,
         }),
+      aiSource: parsed.reply?.trim() ? "gemini" : "fallback",
     };
   } catch (error) {
     console.warn("[recommend] Gemini balanced philosopher chat failed.", {
@@ -1758,16 +1815,15 @@ Rules:
     });
     return {
       philosopherName: personaName,
-      reply: fallbackPhilosopherReplyContextual({
+      reply: safePhilosopherReplyContextual({
         philosopherName: personaName,
         message,
         grade,
         bookTitle,
         philosophicalLens,
         previousStudentMessage,
-        previousPhilosopherReply,
-        turnIndex: history.length,
       }),
+      aiSource: "fallback",
     };
   }
 }
@@ -1880,7 +1936,7 @@ router.post("/recommend/philosopher-chat", async (req, res): Promise<void> => {
     throw error;
   }
 
-  res.json({ ...reply, aiSource: "gemini" });
+  res.json(reply);
 });
 
 router.post("/recommend/by-text", async (req, res): Promise<void> => {
