@@ -352,13 +352,22 @@ async function generateInterestKeywordOptions(
 {"keywords":[{"title":"...","description":"...","keyword":"..."},{"title":"...","description":"...","keyword":"..."},{"title":"...","description":"...","keyword":"..."}]}`;
 
   try {
-    const cleanPrompt = `You are a philosophy librarian for Korean elementary school students.
+    const cleanPrompt = `You are 마음튼튼 철학 사서 for Korean elementary students.
 
 Student interest: "${studentText}"
 
 Create exactly 3 philosophical inquiry keyword options for a 3rd-grade elementary student.
-Each option must be in Korean and must include:
-- title: a short button title
+
+Absolute rules:
+1. Translate the concrete interest into a philosophical theme first.
+   Examples: "전쟁" -> 평화, 갈등 조절, 정의, 인간의 본성. "공룡" -> 존재의 유한함, 소멸, 시간.
+2. Do not return a book title or a title-matching query.
+3. Each option must help Kakao Book Search find elementary humanities/philosophy/ethics picture books or stories.
+4. For "전쟁", prefer queries about 평화, 갈등 조절, 공존, 정의, 배려, 인권, not 우주전쟁 or science fiction.
+5. Return Korean only.
+
+Each option must include:
+- title: a short friendly button title
 - description: one easy sentence explaining the inquiry angle
 - keyword: a Korean book-search query for Kakao Book Search
 
@@ -392,6 +401,9 @@ Return only JSON matching the provided schema.`;
     console.warn("[recommend] Gemini interest keyword generation failed.", {
       message: error instanceof Error ? error.message : String(error),
     });
+    if (hasGeminiConfig()) {
+      throw new GeminiUnavailableError("Gemini가 철학 탐구 키워드를 만들지 못했어요. 잠시 뒤 다시 시도해 주세요.", 502);
+    }
     return fallbackInterestKeywordOptions(studentText);
   }
 }
@@ -625,6 +637,8 @@ async function generateSearchKeywords(
 - 반드시 2~4 단어로 짧게 (5단어 이상이면 검색 결과 0개)
 - [주제어 또는 개념어] + [${dynamicTags}] 형식으로 조합
 - 이번 세션에서는 "어린이 ${studentText.slice(0, 4)}"처럼 직관적인 조합 외에 더 추상적이고 참신한 각도도 시도할 것
+- "전쟁"은 제목 매칭이 아니라 평화, 갈등 해결, 정의, 공존, 인권으로 번역할 것
+- "우주전쟁"처럼 제목이나 SF 장르로 새지 말 것
 - 책 제목 직접 사용 금지
 
 JSON만 출력:
@@ -641,7 +655,13 @@ JSON만 출력:
       const parsed = parseModelJson<{ keywords: string[] }>(text);
       const kws = (parsed.keywords ?? []).filter(Boolean);
       return kws.length >= 1 ? kws : fallbackKeywords(studentText, grade, searchType);
-    } catch {
+    } catch (error) {
+      console.warn("[recommend] Gemini interest search keyword generation failed.", {
+        message: error instanceof Error ? error.message : String(error),
+      });
+      if (hasGeminiConfig()) {
+        throw new GeminiUnavailableError("Gemini가 도서 검색 키워드를 만들지 못했어요. 잠시 뒤 다시 시도해 주세요.", 502);
+      }
       return fallbackKeywords(studentText, grade, searchType);
     }
   }
@@ -699,6 +719,9 @@ JSON만 출력:
     console.warn("[recommend] Gemini search keyword generation failed.", {
       message: error instanceof Error ? error.message : String(error),
     });
+    if (hasGeminiConfig()) {
+      throw new GeminiUnavailableError("Gemini가 도서 검색 키워드를 만들지 못했어요. 잠시 뒤 다시 시도해 주세요.", 502);
+    }
     return fallbackKeywords(studentText, grade, searchType);
   }
 }
@@ -710,6 +733,11 @@ function fallbackKeywords(
 ): string[] {
   if (searchType === "interest") {
     // interest-mode fallbacks: combine the topic with philosophy/science/history
+    if (/전쟁|싸움|갈등|평화/.test(text)) {
+      return grade === "lower"
+        ? ["어린이 평화 그림책", "갈등 해결 철학동화"]
+        : ["어린이 평화 인문학", "정의와 공존 철학"];
+    }
     if (grade === "lower") {
       if (/우주|별|행성|로켓/.test(text)) return ["어린이 우주 과학", "초등 과학 그림책"];
       if (/공룡|화석|고생물/.test(text)) return ["공룡 어린이 과학", "초등 자연 그림책"];
@@ -1165,6 +1193,19 @@ function contextualFallbackSearchTerms(
   selectedKeyword: string,
   grade: "lower" | "higher",
 ): string[] {
+  if (/전쟁|싸움|갈등|평화/.test(`${topic} ${selectedKeyword}`)) {
+    return uniqueStrings(
+      [
+        "어린이 평화 그림책",
+        "갈등 해결 철학동화",
+        "전쟁과 평화 어린이",
+        "공존 배려 그림책",
+        "정의 평화 동화",
+        grade === "lower" ? "초등 인성 그림책" : "어린이 평화 인문학",
+      ],
+      8,
+    );
+  }
   return uniqueStrings(
     [
       selectedKeyword,
@@ -1210,6 +1251,11 @@ Return 6 Korean search queries. Use a balanced mix:
 - children's story/picture/science queries if the interest is concrete, such as robots or space
 - ethics, relationship, thinking, philosophy, or humanities queries
 - broad elementary philosophy fallback queries
+
+Conceptual translation rules:
+- "전쟁" must become peace, conflict resolution, justice, coexistence, empathy, and human rights queries.
+- Do not create science-fiction/title-match queries such as "우주전쟁".
+- Concrete interests must still lead toward real elementary humanities/philosophy/ethics books, not just keyword-matching novels.
 
 Do not return book titles. Return only JSON.`;
 
@@ -1260,6 +1306,7 @@ function scoreBookCandidate(
   const haystack = `${book.title} ${book.contents ?? ""} ${book.publisher ?? ""} ${book.authors.join(" ")}`.toLowerCase();
   const contents = (book.contents ?? "").toLowerCase();
   const title = book.title.toLowerCase();
+  const originalTopic = `${context.sourceText} ${context.selectedKeyword ?? ""}`;
   const topicWords = tokenizeKoreanish(`${context.sourceText} ${context.selectedKeyword ?? ""}`);
   const philosophyWords = [
     "철학",
@@ -1306,6 +1353,11 @@ function scoreBookCandidate(
   if (topicWords.length > 0 && contentTopicMatches === 0) score -= 8;
   if (philosophyMatches === 0) score -= 7;
   if (philosophyMatches >= 2) score += 5;
+  if (/전쟁|싸움|갈등|평화/.test(originalTopic)) {
+    if (/평화|갈등|공존|화해|배려|정의|폭력|인권|난민|사회|약속/.test(haystack)) score += 12;
+    if (/우주전쟁|sf|science fiction|외계|침략|괴물|전투|무기/.test(haystack)) score -= 25;
+    if (title.includes("전쟁") && !/평화|갈등|공존|화해|정의|인권|난민/.test(contents)) score -= 16;
+  }
   if (/퍼플|부크크|좋은땅|북랩/.test(book.publisher ?? "")) score -= 2;
   if (grade === "lower" && /철학동화|그림책|동화|어린이|초등|생각|마음/.test(haystack)) score += 5;
   if (grade === "higher" && /인문|교양|청소년|철학|윤리|토론|생각/.test(haystack)) score += 5;
@@ -1446,7 +1498,7 @@ Description: ${book.contents || "(none)"}`,
     )
     .join("\n\n");
 
-  const prompt = `You are a careful Korean elementary philosophy book recommender.
+  const prompt = `You are 마음튼튼 철학 사서 for Korean 3rd-grade elementary students.
 
 Student original interest or feeling: "${context.sourceText}"
 Selected inquiry keyword: "${context.selectedKeyword ?? "(none)"}"
@@ -1458,22 +1510,25 @@ Choose exactly one book from this real Kakao Book Search candidate list. Do not 
 ${bookList}
 
 Write all output fields in Korean.
-Quality rules:
-- Never repeat or expose an internal routing sentence such as "추천해줘" or "고른 철학 탐구 키워드".
-- Choose a book that can become a philosophy conversation, not merely a fun or informational match.
-- Prefer books whose title or description clearly invites questions about values, responsibility, freedom, justice, identity, mind, relationship, emotion, or existence.
-- If a candidate is mainly science/information, choose it only when its description clearly supports a philosophical question.
-- Recommendation reason must sound like a friendly elementary teacher, not an academic report or bibliography.
-- Recommendation reason must be 2-3 warm Korean sentences. Mention the chosen book and one concrete philosophical connection, but do not list publication metadata, series details, volume numbers, or citation-like facts.
-- If search mode is "emotion", every field must answer the student's feeling first. Do not drift to space/science/history unless the student's feeling explicitly mentions that topic.
-- If the student says they are tired, bored, anxious, sad, angry, or lonely, connect the book to that feeling and self-understanding.
-- philosophyKnowledge must explicitly include either a philosopher name or a clear philosophical concept connected to a scene or idea in the chosen book.
-- philosopherName must be one stable persona that fits the recommendation.
-- philosophicalLens must be a short concept phrase only, such as "기술 윤리", "마음과 정체성", "관계와 책임", "감정과 자유", or "우주와 존재".
-- thinkingQuestion must be one friendly, topic-specific question that directly matches the student interest and chosen book. It must not use a generic "what do I want to protect?" template unless the topic is actually about values or responsibility.
-- For lower grades, write simple and concrete Korean. For upper grades, use one easy concept word but stay elementary-student friendly.
 
-Return only JSON matching the schema.`;
+Absolute system rules:
+1. Conceptual Translation:
+   First translate the student's concrete input into a philosophical theme.
+   Examples: "전쟁" -> 평화, 갈등 조절, 정의, 인간의 본성. "공룡" -> 존재의 유한함, 소멸, 시간.
+2. No title-only matching:
+   Do not choose a popular novel, science fiction, comic, or informational book merely because the keyword appears in the title.
+   Choose a real elementary humanities/philosophy/ethics picture book or story that helps the student explore the translated philosophical theme.
+3. Cohesive Context:
+   empathyMessage, recommendationReason, philosophyKnowledge, and thinkingQuestion must tightly share one philosophical theme.
+   Do not use generic Socrates templates such as "너 자신을 알라" or "무지의 지".
+   Use a philosopher or concept directly connected to the theme. For war/peace use Hobbes, Kant, Rousseau, peace, justice, conflict, coexistence.
+4. Emotion mode:
+   If search mode is "emotion", answer the student's feeling first. Do not drift to space/science/history unless the student explicitly mentioned it.
+5. Tone:
+   Use a warm, friendly Korean teacher tone for elementary students. Do not sound like an academic report.
+   Do not mention publication metadata, awards, volume numbers, "HardCover", or citation-like facts.
+6. JSON only:
+   Return only JSON matching the schema.`;
 
   try {
     let text: string;
@@ -1519,17 +1574,21 @@ Return only JSON matching the schema.`;
         philosopherName: result.philosopherName,
         philosophicalLens: result.philosophicalLens,
       };
+    const repairedText = needsRecommendationRepair(aiText, context, book)
+      ? await repairRecommendationWithGemini({ context, book, grade, flawedText: aiText })
+      : aiText;
     return {
       book,
-      text: needsRecommendationRepair(aiText, context, book)
-        ? friendlyFallbackText(book, grade, context)
-        : aiText,
-      aiSource: needsRecommendationRepair(aiText, context, book) ? "fallback" : "gemini",
+      text: repairedText,
+      aiSource: "gemini",
     };
   } catch (error) {
     console.warn("[recommend] Gemini balanced recommendation failed.", {
       message: error instanceof Error ? error.message : String(error),
     });
+    if (hasGeminiConfig()) {
+      throw new GeminiUnavailableError("Gemini가 추천 문장을 만들지 못했어요. 잠시 뒤 다시 시도해 주세요.", 502);
+    }
     return {
       book: candidateBooks[0],
       text: friendlyFallbackText(candidateBooks[0], grade, context),
@@ -1670,6 +1729,50 @@ function isTooSimilarReply(reply: string, previousReply: string): boolean {
   return overlap / previousWords.length > 0.62;
 }
 
+async function repairPhilosopherReplyWithGemini({
+  personaName,
+  message,
+  grade,
+  bookTitle,
+  philosophicalLens,
+  previousStudentMessage,
+  previousPhilosopherReply,
+  flawedReply,
+}: {
+  personaName: string;
+  message: string;
+  grade: "lower" | "higher";
+  bookTitle: string;
+  philosophicalLens?: string | null;
+  previousStudentMessage?: string;
+  previousPhilosopherReply?: string;
+  flawedReply?: string;
+}): Promise<string> {
+  const prompt = `You are ${personaName}, a friendly philosopher-teacher speaking with a Korean elementary student.
+
+Rewrite the reply using Gemini. Do not use templates.
+
+Book: ${bookTitle}
+Philosophical lens: ${philosophicalLens || "(none)"}
+Previous student message: ${previousStudentMessage || "(none)"}
+Previous philosopher reply: ${previousPhilosopherReply || "(none)"}
+Student's latest message: ${message}
+Flawed reply to avoid: ${flawedReply || "(none)"}
+
+Rules:
+- Answer the latest message directly and warmly.
+- Do not repeat the previous reply's first sentence, structure, or conclusion.
+- Stay tightly on the student's actual question.
+- For grades ${grade === "lower" ? "1-3" : "4-6"}, keep it elementary-student friendly.
+- Use 2-3 short Korean sentences for lower grades, 3-5 for upper grades.
+- Return only JSON: {"reply":"..."}`;
+
+  const text = await generateGeminiText([{ text: prompt }], 1200, true);
+  const parsed = parseModelJson<{ reply?: string }>(text);
+  if (!parsed.reply?.trim()) throw new Error("Gemini repair returned no reply.");
+  return parsed.reply.trim();
+}
+
 function isSpaceTopic(text: string): boolean {
   return /우주|별|행성|은하|로켓|천문|지구 밖|외계/.test(text);
 }
@@ -1746,6 +1849,74 @@ function needsRecommendationRepair(text: Omit<AiSelection, "selectedIndex">, con
   const hasBibliographyTone = /HardCover|양장본|출판사|시리즈|[0-9]+권|한국아동문학|우수도서|저자|작가/.test(combined);
   const emotionDrift = context.searchMode === "emotion" && outputIsSpace && (!inputIsSpace || bookIsOnlyBroadWorld);
   return emotionDrift || hasBibliographyTone;
+}
+
+async function repairRecommendationWithGemini({
+  context,
+  book,
+  grade,
+  flawedText,
+}: {
+  context: RecommendationContext;
+  book: KakaoBook;
+  grade: "lower" | "higher";
+  flawedText?: Omit<AiSelection, "selectedIndex">;
+}): Promise<Omit<AiSelection, "selectedIndex">> {
+  const prompt = `You are 마음튼튼 철학 사서 for Korean 3rd-grade elementary students.
+
+Rewrite the recommendation fields using Gemini. Do not use templates.
+
+Student input: "${context.sourceText}"
+Selected keyword: "${context.selectedKeyword ?? "(none)"}"
+Search mode: ${context.searchMode}
+Grade: ${grade === "lower" ? "grades 1-3" : "grades 4-6"}
+
+Chosen real book:
+Title: ${book.title}
+Authors: ${book.authors.join(", ") || "(unknown)"}
+Description: ${book.contents || "(none)"}
+
+Previous flawed output to fix:
+${flawedText ? JSON.stringify(flawedText, null, 2) : "(none)"}
+
+Absolute rules:
+1. First translate the student's concrete input into a philosophical theme.
+   Examples: "전쟁" -> 평화, 갈등 조절, 정의, 인간의 본성. "공룡" -> 사라짐, 시간, 존재의 유한함.
+2. If search mode is emotion, answer the student's feeling first. Do not drift to space/science/history unless the student explicitly mentioned it.
+3. Do not recommend or explain a book just because the title contains the keyword.
+4. Do not use a generic Socrates template. Choose a philosopher or concept that fits the theme.
+5. Use a warm, friendly Korean teacher tone for elementary students.
+6. Do not mention publication metadata, awards, volume numbers, "HardCover", or citation-like facts.
+7. Return only this exact JSON shape:
+{
+  "empathyMessage": "...",
+  "recommendationReason": "...",
+  "philosophyKnowledge": "...",
+  "thinkingQuestion": "...",
+  "philosopherName": "...",
+  "philosophicalLens": "..."
+}`;
+
+  const text = await generateGeminiText([{ text: prompt }], 4096, true);
+  const parsed = parseModelJson<Partial<AiSelection>>(text);
+  if (
+    !parsed.empathyMessage ||
+    !parsed.recommendationReason ||
+    !parsed.philosophyKnowledge ||
+    !parsed.thinkingQuestion ||
+    !parsed.philosopherName ||
+    !parsed.philosophicalLens
+  ) {
+    throw new Error("Gemini repair returned incomplete recommendation JSON.");
+  }
+  return {
+    empathyMessage: parsed.empathyMessage,
+    recommendationReason: parsed.recommendationReason,
+    philosophyKnowledge: parsed.philosophyKnowledge,
+    thinkingQuestion: parsed.thinkingQuestion,
+    philosopherName: parsed.philosopherName,
+    philosophicalLens: parsed.philosophicalLens,
+  };
 }
 
 function genericBalancedText(
@@ -1931,27 +2102,31 @@ Rules:
     });
     const parsed = parseModelJson<{ philosopherName?: string; reply?: string }>(text);
     const modelReply = parsed.reply?.trim();
-    const fallbackReply = safePhilosopherReplyContextual({
-      philosopherName: personaName,
-      message,
-      grade,
-      bookTitle,
-      philosophicalLens,
-      previousStudentMessage,
-    });
     const reply =
       modelReply && !isTooSimilarReply(modelReply, previousPhilosopherReply)
         ? modelReply
-        : fallbackReply;
+        : await repairPhilosopherReplyWithGemini({
+            personaName,
+            message,
+            grade,
+            bookTitle,
+            philosophicalLens,
+            previousStudentMessage,
+            previousPhilosopherReply,
+            flawedReply: modelReply,
+          });
     return {
       philosopherName: parsed.philosopherName?.trim() || personaName,
       reply,
-      aiSource: reply === modelReply ? "gemini" : "fallback",
+      aiSource: "gemini",
     };
   } catch (error) {
     console.warn("[recommend] Gemini balanced philosopher chat failed.", {
       message: error instanceof Error ? error.message : String(error),
     });
+    if (hasGeminiConfig()) {
+      throw new GeminiUnavailableError("Gemini가 철학자 답변을 만들지 못했어요. 잠시 뒤 다시 시도해 주세요.", 502);
+    }
     return {
       philosopherName: personaName,
       reply: safePhilosopherReplyContextual({
@@ -2090,7 +2265,13 @@ router.post("/recommend/by-text", async (req, res): Promise<void> => {
   const mode: "emotion" | "interest" = searchType === "interest" ? "interest" : "emotion";
 
   // STEP 1: AI generates search keywords (not books)
-  const keywords = await generateSearchKeywords(text, grade, mode);
+  let keywords: string[];
+  try {
+    keywords = await generateSearchKeywords(text, grade, mode);
+  } catch (error) {
+    if (sendGeminiError(res, error)) return;
+    throw error;
+  }
 
   // STEP 2: Fetch real books from Kakao API (grade-filtered)
   const context: RecommendationContext = {
@@ -2180,7 +2361,13 @@ router.post("/recommend/by-image", async (req, res): Promise<void> => {
     ? `학생이 "${detectedBook}"이라는 책을 읽었다. 이 책과 연결되는 ${gradeLabel} ${followUpLabel}을 찾아줘.`
     : `${gradeLabel} 학생에게 맞는 ${followUpLabel}을 찾아줘.`;
 
-  const keywords = await generateSearchKeywords(searchContext, grade);
+  let keywords: string[];
+  try {
+    keywords = await generateSearchKeywords(searchContext, grade);
+  } catch (error) {
+    if (sendGeminiError(res, error)) return;
+    throw error;
+  }
 
   // If we have a detected book, prepend grade-appropriate keyword variant
   const fallbackKw = grade === "lower" ? "초등 철학동화" : "초등 철학";
