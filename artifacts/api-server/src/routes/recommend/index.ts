@@ -91,10 +91,7 @@ function withTopicParticle(text: string, withBatchim: string, withoutBatchim: st
 }
 
 function parseModelJson<T>(text: string): T {
-  const cleaned = text
-    .replace(/^```(?:json)?\s*/i, "")
-    .replace(/\s*```\s*$/i, "")
-    .trim();
+  const cleaned = text.replace(/```(?:json)?|```/gi, "").trim();
   const start = cleaned.search(/[\[{]/);
   const end = Math.max(cleaned.lastIndexOf("}"), cleaned.lastIndexOf("]"));
   const jsonLike = start >= 0 && end >= start ? cleaned.slice(start, end + 1) : cleaned;
