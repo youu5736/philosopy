@@ -86,11 +86,13 @@ export default function RecommendPage() {
   };
 
   const handleApiError = (error: any) => {
-    const msg = error?.response?.data?.error || error?.message || "";
+    const data = error?.response?.data;
+    const msg = data?.error || error?.message || "";
+    const code = data?.errorCode ? ` [${data.errorCode}]` : "";
     if (msg.toLowerCase().includes("api key") || msg.toLowerCase().includes("config")) {
-      setApiError("AI 사서 선생님이 아직 준비 중이에요! 관리자에게 API 키 설정을 부탁해 주세요. 🔑");
+      setApiError(`AI 사서 선생님이 아직 준비 중이에요! 관리자에게 API 키 설정을 부탁해 주세요. 🔑${code}${msg ? ` ${msg}` : ""}`);
     } else {
-      setApiError("앗, 책을 찾는 중에 문제가 생겼어요. 다시 한 번 시도해줄래요? 😥");
+      setApiError(`앗, 책을 찾는 중에 문제가 생겼어요. 다시 한 번 시도해줄래요? 😥${code}${msg ? ` ${msg}` : ""}`);
     }
   };
 

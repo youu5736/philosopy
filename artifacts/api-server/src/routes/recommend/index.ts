@@ -48,11 +48,13 @@ let warnedMissingGeminiEnv = false;
 
 class GeminiUnavailableError extends Error {
   readonly statusCode: number;
+  readonly errorCode: string;
 
-  constructor(message: string, statusCode = 503) {
+  constructor(message: string, statusCode = 503, errorCode = "gemini_unavailable") {
     super(message);
     this.name = "GeminiUnavailableError";
     this.statusCode = statusCode;
+    this.errorCode = errorCode;
   }
 }
 
@@ -71,6 +73,7 @@ function sendGeminiError(res: { status: (code: number) => { json: (body: unknown
   if (!(error instanceof GeminiUnavailableError)) return false;
   res.status(error.statusCode).json({
     error: error.message,
+    errorCode: error.errorCode,
     aiSource: "gemini-unavailable",
   });
   return true;
@@ -91,63 +94,49 @@ function withTopicParticle(text: string, withBatchim: string, withoutBatchim: st
 }
 
 function parseModelJson<T>(text: string): T {
-  {
-    const cleaned = text.replace(/```(?:json)?|```/gi, "").trim();
-    const candidates = [
-      cleaned.match(/\{[\s\S]*\}/)?.[0],
-      cleaned.match(/\[[\s\S]*\]/)?.[0],
-      cleaned,
-    ].filter((value): value is string => Boolean(value?.trim()));
-    let lastError: unknown = null;
-
-    for (const candidate of candidates) {
-      const repaired = candidate
-        .trim()
-        .replace(/,\s*([}\]])/g, "$1")
-        .replace(/([{,]\s*)([A-Za-z_$][A-Za-z0-9_$]*)(\s*:)/g, '$1"$2"$3');
-      try {
-        return JSON.parse(repaired) as T;
-      } catch (error) {
-        lastError = error;
-        const recovered = recoverModelJson(repaired);
-        if (recovered) return recovered as T;
-      }
-    }
-
-    console.warn("[recommend] Failed to parse Gemini JSON.", {
-      message: lastError instanceof Error ? lastError.message : String(lastError),
-      excerpt: cleaned.slice(0, 500),
-    });
-    throw lastError instanceof Error
-      ? lastError
-      : new Error("올바른 JSON 형식을 찾을 수 없습니다.");
-  }
-
   const cleaned = text.replace(/```(?:json)?|```/gi, "").trim();
-  const start = cleaned.search(/[\[{]/);
-  const end = Math.max(cleaned.lastIndexOf("}"), cleaned.lastIndexOf("]"));
-  const jsonLike = start >= 0 && end >= start ? cleaned.slice(start, end + 1) : cleaned;
-  const repaired = jsonLike
-    .replace(/,\s*([}\]])/g, "$1")
-    .replace(/([{,]\s*)([A-Za-z_$가-힣][A-Za-z0-9_$가-힣]*)(\s*:)/g, '$1"$2"$3');
-  try {
-    return JSON.parse(repaired) as T;
-  } catch (error) {
-    const recovered = recoverModelJson(repaired);
-    if (recovered) return recovered as T;
+  const candidates = [
+    cleaned.match(/\{[\s\S]*\}/)?.[0],
+    cleaned.match(/\[[\s\S]*\]/)?.[0],
+    cleaned,
+  ].filter((value): value is string => Boolean(value?.trim()));
+  let lastError: unknown = null;
 
-    console.warn("[recommend] Failed to parse Gemini JSON.", {
-      message: error instanceof Error ? error.message : String(error),
-      excerpt: repaired.slice(0, 500),
-    });
-    throw error;
+  for (const candidate of candidates) {
+    const repaired = candidate
+      .trim()
+      .replace(/,\s*([}\]])/g, "$1")
+      .replace(/([{,]\s*)([A-Za-z_$][A-Za-z0-9_$]*)(\s*:)/g, '$1"$2"$3');
+    try {
+      return JSON.parse(repaired) as T;
+    } catch (error) {
+      lastError = error;
+      const recovered = recoverModelJson(repaired);
+      if (recovered) return recovered as T;
+    }
   }
+
+  console.warn("[recommend] Failed to parse Gemini JSON.", {
+    message: lastError instanceof Error ? lastError.message : String(lastError),
+    excerpt: cleaned.slice(0, 500),
+  });
+  throw new GeminiUnavailableError(
+    "Gemini JSON parse failed: 올바른 JSON object를 찾거나 해석하지 못했어요.",
+    502,
+    "gemini_json_parse_failed",
+  );
 }
 
 function extractStringField(source: string, field: string): string | undefined {
   const pattern = new RegExp(`"${field}"\\s*:\\s*"([\\s\\S]*?)(?:"\\s*[,}]|[,}])`);
   const value = source.match(pattern)?.[1]?.trim();
   return value ? value.replace(/\\n/g, "\n") : undefined;
+}
+
+function extractStringArrayField(source: string, field: string): string[] {
+  const pattern = new RegExp(`"${field}"\\s*:\\s*\\[([\\s\\S]*?)\\]`);
+  const body = source.match(pattern)?.[1] ?? "";
+  return Array.from(body.matchAll(/"([^"]+)"/g)).map((match) => match[1].trim()).filter(Boolean);
 }
 
 function recoverModelJson(source: string): unknown | null {
@@ -157,7 +146,8 @@ function recoverModelJson(source: string): unknown | null {
         const chunk = match[0];
         const title = extractStringField(chunk, "title");
         const description = extractStringField(chunk, "description");
-        const keyword = extractStringField(chunk, "keyword");
+        const tags = extractStringArrayField(chunk, "tags");
+        const keyword = extractStringField(chunk, "keyword") || tags[0];
         return title && description && keyword
           ? { title, description, keyword }
           : null;
@@ -240,7 +230,10 @@ async function generateGeminiText(
     throw new Error("Gemini AI environment variables are not configured.");
   }
 
-  const requestUrl = `${baseUrl.replace(/\/$/, "")}/models/gemini-2.5-flash:generateContent`;
+  const models = (process.env.AI_INTEGRATIONS_GEMINI_MODELS || process.env.AI_INTEGRATIONS_GEMINI_MODEL || "gemini-2.5-flash-lite,gemini-2.5-flash,gemini-2.0-flash-lite,gemini-2.0-flash")
+    .split(",")
+    .map((model) => model.trim())
+    .filter(Boolean);
   const requestBody = JSON.stringify({
     contents: [{ role: "user", parts }],
     generationConfig: {
@@ -253,50 +246,59 @@ async function generateGeminiText(
   let response: Response | null = null;
   let lastError: unknown = null;
 
-  for (let attempt = 1; attempt <= 3; attempt += 1) {
-    try {
-      response = await fetch(requestUrl, {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          "x-goog-api-key": apiKey,
-        },
-        body: requestBody,
-      });
+  for (const model of models) {
+    const requestUrl = `${baseUrl.replace(/\/$/, "")}/models/${model}:generateContent`;
+    for (let attempt = 1; attempt <= 2; attempt += 1) {
+      try {
+        response = await fetch(requestUrl, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-goog-api-key": apiKey,
+          },
+          body: requestBody,
+        });
 
-      if (response.ok) break;
+        if (response.ok) {
+          const data = (await response.json()) as {
+            candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+          };
+          const text = data.candidates?.[0]?.content?.parts
+            ?.map((part) => part.text ?? "")
+            .join("")
+            .trim();
 
-      const body = await response.text();
-      lastError = new Error(`Gemini API request failed (${response.status}): ${body.slice(0, 500)}`);
+          if (!text) {
+            throw new Error(`Gemini API returned no text from ${model}.`);
+          }
 
-      if (![408, 429, 500, 502, 503, 504].includes(response.status) || attempt === 3) {
-        throw lastError;
+          return text;
+        }
+
+        const body = await response.text();
+        lastError = new Error(`Gemini API request failed (${response.status}) on ${model}: ${body.slice(0, 500)}`);
+
+        if (response.status === 429 || response.status === 404) {
+          console.warn("[recommend] Gemini model unavailable, trying next model.", {
+            model,
+            status: response.status,
+          });
+          break;
+        }
+
+        if (![408, 500, 502, 503, 504].includes(response.status) || attempt === 2) {
+          throw lastError;
+        }
+      } catch (error) {
+        lastError = error;
+        if (attempt === 2) break;
       }
-    } catch (error) {
-      lastError = error;
-      if (attempt === 3) throw error;
+
+      await sleep(350 * attempt);
     }
-
-    await sleep(350 * attempt);
   }
 
-  if (!response?.ok) {
-    throw lastError instanceof Error ? lastError : new Error("Gemini API request failed.");
-  }
-
-  const data = (await response.json()) as {
-    candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
-  };
-  const text = data.candidates?.[0]?.content?.parts
-    ?.map((part) => part.text ?? "")
-    .join("")
-    .trim();
-
-  if (!text) {
-    throw new Error("Gemini API returned no text.");
-  }
-
-  return text;
+  throw lastError instanceof Error ? lastError : new Error("Gemini API request failed.");
 }
 
 function fallbackInterestKeywordOptions(text: string): InterestKeywordOption[] {
@@ -329,6 +331,7 @@ function fallbackInterestKeywordOptions(text: string): InterestKeywordOption[] {
 function normalizeInterestKeywordOptions(
   value: unknown,
   fallbackText: string,
+  allowFallback = true,
 ): InterestKeywordOption[] {
   const rawItems =
     value && typeof value === "object" && Array.isArray((value as { keywords?: unknown }).keywords)
@@ -356,6 +359,7 @@ function normalizeInterestKeywordOptions(
     .slice(0, 3);
 
   if (normalized.length === 3) return normalized;
+  if (!allowFallback) return normalized;
 
   const fallback = fallbackInterestKeywordOptions(fallbackText);
   return [...normalized, ...fallback].slice(0, 3);
@@ -435,16 +439,26 @@ async function generateInterestKeywordOptions(
       },
       required: ["keywords"],
     });
-    return normalizeInterestKeywordOptions(
+    const keywords = normalizeInterestKeywordOptions(
       parseModelJson<unknown>(text),
       studentText,
+      false,
     );
+    if (keywords.length !== 3) {
+      throw new GeminiUnavailableError(
+        "Gemini keyword schema mismatch: title, description, tags를 가진 카드 3개가 필요해요.",
+        502,
+        "gemini_keyword_schema_mismatch",
+      );
+    }
+    return keywords;
   } catch (error) {
     console.warn("[recommend] Gemini interest keyword generation failed.", {
       message: error instanceof Error ? error.message : String(error),
     });
+    if (error instanceof GeminiUnavailableError) throw error;
     if (hasGeminiConfig()) {
-      throw new GeminiUnavailableError("Gemini가 철학 탐구 키워드를 만들지 못했어요. 잠시 뒤 다시 시도해 주세요.", 502);
+      throw new GeminiUnavailableError("Gemini가 철학 탐구 키워드를 만들지 못했어요. 잠시 뒤 다시 시도해 주세요.", 502, "gemini_interest_keywords_failed");
     }
     return fallbackInterestKeywordOptions(studentText);
   }
@@ -702,7 +716,7 @@ JSON만 출력:
         message: error instanceof Error ? error.message : String(error),
       });
       if (hasGeminiConfig()) {
-        throw new GeminiUnavailableError("Gemini가 도서 검색 키워드를 만들지 못했어요. 잠시 뒤 다시 시도해 주세요.", 502);
+        throw new GeminiUnavailableError("Gemini가 도서 검색 키워드를 만들지 못했어요. 잠시 뒤 다시 시도해 주세요.", 502, "gemini_search_keywords_failed");
       }
       return fallbackKeywords(studentText, grade, searchType);
     }
@@ -762,7 +776,7 @@ JSON만 출력:
       message: error instanceof Error ? error.message : String(error),
     });
     if (hasGeminiConfig()) {
-      throw new GeminiUnavailableError("Gemini가 도서 검색 키워드를 만들지 못했어요. 잠시 뒤 다시 시도해 주세요.", 502);
+      throw new GeminiUnavailableError("Gemini가 도서 검색 키워드를 만들지 못했어요. 잠시 뒤 다시 시도해 주세요.", 502, "gemini_search_keywords_failed");
     }
     return fallbackKeywords(studentText, grade, searchType);
   }
@@ -1630,7 +1644,7 @@ Absolute system rules:
       message: error instanceof Error ? error.message : String(error),
     });
     if (hasGeminiConfig()) {
-      throw new GeminiUnavailableError("Gemini가 추천 문장을 만들지 못했어요. 잠시 뒤 다시 시도해 주세요.", 502);
+      throw new GeminiUnavailableError("Gemini가 추천 문장을 만들지 못했어요. 잠시 뒤 다시 시도해 주세요.", 502, "gemini_recommendation_failed");
     }
     return {
       book: candidateBooks[0],
@@ -2169,7 +2183,7 @@ Rules:
       message: error instanceof Error ? error.message : String(error),
     });
     if (hasGeminiConfig()) {
-      throw new GeminiUnavailableError("Gemini가 철학자 답변을 만들지 못했어요. 잠시 뒤 다시 시도해 주세요.", 502);
+      throw new GeminiUnavailableError("Gemini가 철학자 답변을 만들지 못했어요. 잠시 뒤 다시 시도해 주세요.", 502, "gemini_chat_failed");
     }
     return {
       philosopherName: personaName,
@@ -2200,6 +2214,7 @@ router.post("/recommend/interest-keywords", async (req, res): Promise<void> => {
     const keywords = await generateInterestKeywordOptions(parsed.data.text);
     res.json({ keywords, aiSource: "gemini" });
   } catch (error) {
+    req.log.warn({ stage: "interest-keywords:gemini", err: error }, "Interest keyword generation failed");
     if (sendGeminiError(res, error)) return;
     throw error;
   }
@@ -2227,9 +2242,12 @@ router.post("/recommend/by-keyword", async (req, res): Promise<void> => {
   const books = await fetchBalancedBooks(searchKeywords, grade, context, req.log, 30);
 
   if (books.length === 0) {
+    req.log.warn({ stage: "by-keyword:kakao", searchKeywords, grade, context }, "No Kakao book candidates");
     res.status(503).json({
       error:
         "지금 선택한 키워드로 책을 찾을 수 없어요. 다른 탐구 키워드를 골라 볼래요?",
+      errorCode: "kakao_no_candidates",
+      aiSource: "gemini",
     });
     return;
   }
@@ -2238,6 +2256,7 @@ router.post("/recommend/by-keyword", async (req, res): Promise<void> => {
   try {
     selected = await selectAndDescribeBalanced(context, books, grade);
   } catch (error) {
+    req.log.warn({ stage: "by-keyword:gemini-select", err: error }, "Gemini recommendation selection failed");
     if (sendGeminiError(res, error)) return;
     throw error;
   }
@@ -2290,6 +2309,7 @@ router.post("/recommend/philosopher-chat", async (req, res): Promise<void> => {
       philosophicalLens,
     });
   } catch (error) {
+    req.log.warn({ stage: "chat:gemini", err: error }, "Gemini philosopher chat failed");
     if (sendGeminiError(res, error)) return;
     throw error;
   }
@@ -2313,6 +2333,7 @@ router.post("/recommend/by-text", async (req, res): Promise<void> => {
   try {
     keywords = await generateSearchKeywords(text, grade, mode);
   } catch (error) {
+    req.log.warn({ stage: "by-text:gemini-keywords", err: error }, "Gemini search keyword generation failed");
     if (sendGeminiError(res, error)) return;
     throw error;
   }
@@ -2326,9 +2347,12 @@ router.post("/recommend/by-text", async (req, res): Promise<void> => {
   const books = await fetchBalancedBooks(keywords, grade, context, req.log, 24);
 
   if (books.length === 0) {
+    req.log.warn({ stage: "by-text:kakao", keywords, grade, context }, "No Kakao book candidates");
     res.status(503).json({
       error:
         "지금 책을 찾을 수 없어요. 잠시 후 다시 시도해 줄래요? 도서 검색 서비스에 일시적인 문제가 있어요. 😥",
+      errorCode: "kakao_no_candidates",
+      aiSource: "gemini",
     });
     return;
   }
@@ -2338,6 +2362,7 @@ router.post("/recommend/by-text", async (req, res): Promise<void> => {
   try {
     selected = await selectAndDescribeBalanced(context, books, grade);
   } catch (error) {
+    req.log.warn({ stage: "by-text:gemini-select", err: error }, "Gemini recommendation selection failed");
     if (sendGeminiError(res, error)) return;
     throw error;
   }
@@ -2377,7 +2402,7 @@ router.post("/recommend/by-image", async (req, res): Promise<void> => {
     try {
       if (!ai) throw new Error("Gemini AI integration unavailable");
       const detectResponse = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
+        model: process.env.AI_INTEGRATIONS_GEMINI_MODEL || "gemini-2.5-flash-lite",
         contents: [
           {
             role: "user",
@@ -2409,6 +2434,7 @@ router.post("/recommend/by-image", async (req, res): Promise<void> => {
   try {
     keywords = await generateSearchKeywords(searchContext, grade);
   } catch (error) {
+    req.log.warn({ stage: "by-image:gemini-keywords", err: error }, "Gemini search keyword generation failed");
     if (sendGeminiError(res, error)) return;
     throw error;
   }
@@ -2428,9 +2454,12 @@ router.post("/recommend/by-image", async (req, res): Promise<void> => {
   const books = await fetchBalancedBooks(allKeywords, grade, imageContext, req.log, 24);
 
   if (books.length === 0) {
+    req.log.warn({ stage: "by-image:kakao", allKeywords, grade, imageContext }, "No Kakao book candidates");
     res.status(503).json({
       error:
         "지금 책을 찾을 수 없어요. 잠시 후 다시 시도해 줄래요? 도서 검색 서비스에 일시적인 문제가 있어요. 😥",
+      errorCode: "kakao_no_candidates",
+      aiSource: "gemini",
     });
     return;
   }
@@ -2440,6 +2469,7 @@ router.post("/recommend/by-image", async (req, res): Promise<void> => {
   try {
     selected = await selectAndDescribeBalanced(imageContext, books, grade);
   } catch (error) {
+    req.log.warn({ stage: "by-image:gemini-select", err: error }, "Gemini recommendation selection failed");
     if (sendGeminiError(res, error)) return;
     throw error;
   }
