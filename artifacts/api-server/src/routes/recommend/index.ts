@@ -91,6 +91,38 @@ function withTopicParticle(text: string, withBatchim: string, withoutBatchim: st
 }
 
 function parseModelJson<T>(text: string): T {
+  {
+    const cleaned = text.replace(/```(?:json)?|```/gi, "").trim();
+    const candidates = [
+      cleaned.match(/\{[\s\S]*\}/)?.[0],
+      cleaned.match(/\[[\s\S]*\]/)?.[0],
+      cleaned,
+    ].filter((value): value is string => Boolean(value?.trim()));
+    let lastError: unknown = null;
+
+    for (const candidate of candidates) {
+      const repaired = candidate
+        .trim()
+        .replace(/,\s*([}\]])/g, "$1")
+        .replace(/([{,]\s*)([A-Za-z_$][A-Za-z0-9_$]*)(\s*:)/g, '$1"$2"$3');
+      try {
+        return JSON.parse(repaired) as T;
+      } catch (error) {
+        lastError = error;
+        const recovered = recoverModelJson(repaired);
+        if (recovered) return recovered as T;
+      }
+    }
+
+    console.warn("[recommend] Failed to parse Gemini JSON.", {
+      message: lastError instanceof Error ? lastError.message : String(lastError),
+      excerpt: cleaned.slice(0, 500),
+    });
+    throw lastError instanceof Error
+      ? lastError
+      : new Error("올바른 JSON 형식을 찾을 수 없습니다.");
+  }
+
   const cleaned = text.replace(/```(?:json)?|```/gi, "").trim();
   const start = cleaned.search(/[\[{]/);
   const end = Math.max(cleaned.lastIndexOf("}"), cleaned.lastIndexOf("]"));
@@ -367,6 +399,7 @@ Each option must include:
 - title: a short friendly button title
 - description: one easy sentence explaining the inquiry angle
 - keyword: a Korean book-search query for Kakao Book Search
+- Use exactly these key names: title, description, keyword. Do not use tags, query, searchTerm, or label.
 
 Return only JSON matching the provided schema.`;
 
@@ -1525,7 +1558,8 @@ Absolute system rules:
    Use a warm, friendly Korean teacher tone for elementary students. Do not sound like an academic report.
    Do not mention publication metadata, awards, volume numbers, "HardCover", or citation-like facts.
 6. JSON only:
-   Return only JSON matching the schema.`;
+   Return only JSON matching the schema.
+   Use exactly these key names: selectedIndex, empathyMessage, recommendationReason, philosophyKnowledge, thinkingQuestion, philosopherName, philosophicalLens.`;
 
   try {
     let text: string;
@@ -1892,7 +1926,8 @@ Absolute rules:
   "thinkingQuestion": "...",
   "philosopherName": "...",
   "philosophicalLens": "..."
-}`;
+}
+Use exactly these key names. Do not use reason, tags, question, lens, or philosopher.`;
 
   const text = await generateGeminiText([{ text: prompt }], 4096, true);
   const parsed = parseModelJson<Partial<AiSelection>>(text);
