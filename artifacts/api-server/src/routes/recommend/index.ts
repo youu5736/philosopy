@@ -342,7 +342,13 @@ function normalizeInterestKeywordOptions(
       const title = typeof record.title === "string" ? record.title.trim() : "";
       const description =
         typeof record.description === "string" ? record.description.trim() : "";
-      const keyword = typeof record.keyword === "string" ? record.keyword.trim() : title;
+      const tags = Array.isArray(record.tags)
+        ? record.tags.filter((tag): tag is string => typeof tag === "string")
+        : [];
+      const keyword =
+        typeof record.keyword === "string" && record.keyword.trim()
+          ? record.keyword.trim()
+          : tags[0]?.trim() || title;
       if (!title || !description || !keyword) return null;
       return { title, description, keyword };
     })
@@ -362,46 +368,47 @@ async function generateInterestKeywordOptions(
     return fallbackInterestKeywordOptions(studentText);
   }
 
-  const prompt = `너는 초등학생을 위한 철학 사서야.
-
-사용자의 관심사: "${studentText}"
-
-이 관심사를 바로 도서 검색어로 쓰지 말고, 초등학교 3학년이 이해할 수 있는 철학적 탐구 키워드 3개로 바꿔 줘.
-
-규칙:
-- 반드시 3개만 만든다.
-- 각 항목은 title, description, keyword를 가진다.
-- title은 버튼에 들어갈 짧은 제목으로 쓴다.
-- description은 초등 3학년이 이해할 수 있는 쉬운 설명 1문장으로 쓴다.
-- keyword는 카카오 도서 검색에 바로 넣을 2~5단어 검색어로 쓴다.
-- 특정 책 제목을 지어내지 않는다.
-- JSON만 출력한다.
-
-출력 형식:
-{"keywords":[{"title":"...","description":"...","keyword":"..."},{"title":"...","description":"...","keyword":"..."},{"title":"...","description":"...","keyword":"..."}]}`;
-
   try {
-    const cleanPrompt = `You are 마음튼튼 철학 사서 for Korean elementary students.
+    const cleanPrompt = `당신은 초등 3학년 수준의 철학 탐구 키워드를 생성하는 로직입니다. 
+당신은 사람이 아닙니다. 절대로 친절하게 대답하거나, 인사말을 건네거나, 설명글을 붙이지 마세요.
 
-Student interest: "${studentText}"
+학생 관심사: "${studentText}"
 
-Create exactly 3 philosophical inquiry keyword options for a 3rd-grade elementary student.
+말을 듣지 않으면 시스템이 다운됩니다. 다음 규칙을 절대적으로 사수하세요:
 
-Absolute rules:
-1. Translate the concrete interest into a philosophical theme first.
-   Examples: "전쟁" -> 평화, 갈등 조절, 정의, 인간의 본성. "공룡" -> 존재의 유한함, 소멸, 시간.
-2. Do not return a book title or a title-matching query.
-3. Each option must help Kakao Book Search find elementary humanities/philosophy/ethics picture books or stories.
-4. For "전쟁", prefer queries about 평화, 갈등 조절, 공존, 정의, 배려, 인권, not 우주전쟁 or science fiction.
-5. Return Korean only.
+1. 출력 형식 제한:
+   - 오직 순수한 JSON object 파일만 출력하세요.
+   - 앞뒤에 마크다운 기호인 '~~~json' 과 '~~~'를 절대, 절대로 붙이지 마세요.
+   - 실제 출력에는 백틱 3개로 된 코드블록도 절대 붙이지 마세요.
+   - 첫 글자는 무조건 '{'로 시작해야 하고, 마지막 글자는 무조건 '}'로 끝나야 합니다.
 
-Each option must include:
-- title: a short friendly button title
-- description: one easy sentence explaining the inquiry angle
-- keyword: a Korean book-search query for Kakao Book Search
-- Use exactly these key names: title, description, keyword. Do not use tags, query, searchTerm, or label.
+2. 컨텐츠 규칙 (초등 3학년 맞춤형):
+   - 관심사(예: 도서, 도덕, 역사 등)를 받으면 획일적인 템플릿(~는 왜 소중할까?)을 쓰지 마세요.
+   - 가치 중립적이고 교육적인 질문으로 카드 3개를 생성하세요.
+     * 카드 1 (관계/윤리): 서로 도우며 살아가는 약속과 가치에 대한 질문
+     * 카드 2 (존재/가치): 눈에 보이지 않는 소중한 마음에 대한 질문
+     * 카드 3 (생각/질문): 당연한 것을 다르게 생각해보는 질문
 
-Return only JSON matching the provided schema.`;
+3. 출력해야 할 정확한 JSON 구조 예시:
+{
+  "keywords": [
+    {
+      "title": "올바른 마음",
+      "description": "우리가 무엇이 옳고 그른지 스스로 생각해보는 것은 왜 중요할까요?",
+      "tags": ["초등 도덕 그림책", "어린이 인성 동화"]
+    },
+    {
+      "title": "약속과 규칙",
+      "description": "모두가 행복하게 지내기 위해 만든 약속은 왜 지켜야 할까요?",
+      "tags": ["가치 동화", "어린이 사회 규칙"]
+    },
+    {
+      "title": "마음의 목소리",
+      "description": "내 마음속 양심의 소리에 귀를 기울인다는 것은 무슨 뜻일까요?",
+      "tags": ["초등 철학 책", "양심 동화"]
+    }
+  ]
+}`;
 
     const text = await generateGeminiText([{ text: cleanPrompt }], 2048, true, {
       type: "OBJECT",
@@ -415,9 +422,14 @@ Return only JSON matching the provided schema.`;
             properties: {
               title: { type: "STRING" },
               description: { type: "STRING" },
-              keyword: { type: "STRING" },
+              tags: {
+                type: "ARRAY",
+                minItems: 1,
+                maxItems: 3,
+                items: { type: "STRING" },
+              },
             },
-            required: ["title", "description", "keyword"],
+            required: ["title", "description", "tags"],
           },
         },
       },
