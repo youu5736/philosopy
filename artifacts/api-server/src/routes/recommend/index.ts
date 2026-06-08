@@ -531,6 +531,12 @@ async function generateInterestKeywordOptions(
 
 type InterestKeywordAiSource = "gemini" | "gemini-recovered" | "fallback";
 
+interface InterestTopicProfile {
+  anchors: string[];
+  promptHint: string;
+  fallbackCards: InterestKeywordOption[];
+}
+
 function stableInterestKeywordFallback(text: string): InterestKeywordOption[] {
   const topic = text.trim() || "궁금한 주제";
   const topicWith = withTopicParticle(topic, "과", "와");
@@ -552,6 +558,224 @@ function stableInterestKeywordFallback(text: string): InterestKeywordOption[] {
       keyword: `${topic} 질문 생각 어린이 인문`,
     },
   ];
+}
+
+function getInterestTopicProfile(text: string): InterestTopicProfile {
+  const topic = text.trim() || "궁금한 주제";
+
+  if (/역사|과거|옛날|기록|시간/.test(topic)) {
+    return {
+      anchors: ["역사", "과거", "옛날", "기억", "기록", "시간", "사건", "선택", "책임"],
+      promptHint: "Translate history into past choices, memory and records, time and change, justice and responsibility.",
+      fallbackCards: [
+        {
+          title: "역사 속 선택",
+          description: "옛날 사람들의 선택을 보며 무엇이 옳고 서로에게 도움이 되었는지 생각해 봐요.",
+          keyword: "어린이 역사 철학 동화",
+        },
+        {
+          title: "기억과 기록",
+          description: "우리가 과거를 기억하고 기록하는 일은 왜 소중한지 살펴봐요.",
+          keyword: "어린이 인문 역사 그림책",
+        },
+        {
+          title: "옛날을 다르게 보기",
+          description: "역사는 외우는 것만이 아니라 왜 그런 일이 일어났는지 묻는 일이에요.",
+          keyword: "초등 역사 질문 인문",
+        },
+      ],
+    };
+  }
+
+  if (/전쟁|평화|갈등/.test(topic)) {
+    return {
+      anchors: ["전쟁", "평화", "갈등", "화해", "공존", "정의", "폭력", "약속"],
+      promptHint: "Translate war into peace, conflict resolution, justice, coexistence, and promises that prevent violence.",
+      fallbackCards: [
+        {
+          title: "전쟁과 평화",
+          description: "다툼이 커질 때 평화를 선택한다는 것은 어떤 뜻인지 생각해 봐요.",
+          keyword: "어린이 평화 철학 그림책",
+        },
+        {
+          title: "갈등을 푸는 약속",
+          description: "서로 다른 생각을 가진 사람들이 함께 살려면 어떤 약속이 필요할까요?",
+          keyword: "갈등 화해 어린이 인문 동화",
+        },
+        {
+          title: "정의로운 선택",
+          description: "힘이 센 사람이 늘 옳은지, 정의로운 선택은 무엇인지 물어봐요.",
+          keyword: "어린이 정의 평화 동화",
+        },
+      ],
+    };
+  }
+
+  if (/공룡|소멸|멸종/.test(topic)) {
+    return {
+      anchors: ["공룡", "멸종", "사라", "시간", "생명", "존재", "변화"],
+      promptHint: "Translate dinosaurs into time, extinction, life, change, and what it means for something to exist and disappear.",
+      fallbackCards: [
+        {
+          title: "공룡과 긴 시간",
+          description: "아주 오래전 살았던 공룡을 보며 시간의 길이를 상상해 봐요.",
+          keyword: "공룡 시간 생명 그림책",
+        },
+        {
+          title: "사라진다는 것",
+          description: "공룡이 사라진 일을 통해 존재와 변화에 대해 생각해 봐요.",
+          keyword: "멸종 생명 어린이 인문",
+        },
+        {
+          title: "남겨진 흔적",
+          description: "없어진 뒤에도 흔적이 남는다는 것은 어떤 의미인지 물어봐요.",
+          keyword: "공룡 화석 철학 동화",
+        },
+      ],
+    };
+  }
+
+  if (/친구|우정|관계/.test(topic)) {
+    return {
+      anchors: ["친구", "우정", "관계", "배려", "믿음", "약속", "책임"],
+      promptHint: "Translate friendship into trust, care, responsibility, promises, and relationships.",
+      fallbackCards: [
+        {
+          title: "친구와 믿음",
+          description: "친구를 믿는 마음은 어떻게 만들어지는지 생각해 봐요.",
+          keyword: "친구 우정 철학 동화",
+        },
+        {
+          title: "배려하는 관계",
+          description: "내 마음과 친구의 마음을 함께 살피는 일은 왜 중요할까요?",
+          keyword: "배려 관계 어린이 그림책",
+        },
+        {
+          title: "함께 지키는 약속",
+          description: "친구 사이의 약속과 책임이 관계를 어떻게 튼튼하게 만드는지 물어봐요.",
+          keyword: "친구 약속 책임 동화",
+        },
+      ],
+    };
+  }
+
+  if (/화남|감정|마음|피곤|슬픔|기쁨/.test(topic)) {
+    return {
+      anchors: ["감정", "마음", "화", "슬픔", "피곤", "기분", "선택", "표현"],
+      promptHint: "Translate feelings into understanding emotions, expressing them safely, choosing actions, and caring for the mind.",
+      fallbackCards: [
+        {
+          title: "감정을 알아차리기",
+          description: "내 마음에 어떤 감정이 찾아왔는지 이름 붙여 보는 질문이에요.",
+          keyword: "어린이 감정 철학 그림책",
+        },
+        {
+          title: "화가 날 때의 선택",
+          description: "화가 났을 때 어떤 행동을 고를 수 있는지 생각해 봐요.",
+          keyword: "화 감정 조절 어린이 동화",
+        },
+        {
+          title: "마음을 돌보는 말",
+          description: "내 마음과 다른 사람의 마음을 다치지 않게 말하는 방법을 물어봐요.",
+          keyword: "마음 표현 배려 그림책",
+        },
+      ],
+    };
+  }
+
+  if (/로봇|AI|인공지능|기술/.test(topic)) {
+    return {
+      anchors: ["로봇", "기술", "인공지능", "AI", "마음", "책임", "윤리", "선택"],
+      promptHint: "Translate robots and AI into technology ethics, responsibility, mind, choice, and what makes humans human.",
+      fallbackCards: [
+        {
+          title: "로봇과 마음",
+          description: "로봇이 마음을 가진다면 우리는 어떻게 대해야 할지 생각해 봐요.",
+          keyword: "로봇 마음 어린이 철학",
+        },
+        {
+          title: "기술의 책임",
+          description: "편리한 기술을 만들고 쓸 때 어떤 책임이 필요한지 물어봐요.",
+          keyword: "어린이 기술 윤리 동화",
+        },
+        {
+          title: "사람다운 선택",
+          description: "사람과 로봇의 차이를 보며 인간다움이 무엇인지 생각해 봐요.",
+          keyword: "인공지능 인간다움 그림책",
+        },
+      ],
+    };
+  }
+
+  if (/우주|별|행성/.test(topic)) {
+    return {
+      anchors: ["우주", "별", "행성", "존재", "넓", "작은", "경이", "세계"],
+      promptHint: "Translate space into wonder, existence, vastness, smallness, and our place in the world.",
+      fallbackCards: [
+        {
+          title: "넓은 우주와 나",
+          description: "아주 넓은 우주 속에서 나는 어떤 존재인지 생각해 봐요.",
+          keyword: "우주 존재 어린이 철학",
+        },
+        {
+          title: "별을 보는 마음",
+          description: "별을 보며 생기는 궁금함과 경이로움을 따라가 봐요.",
+          keyword: "별 우주 그림책 철학",
+        },
+        {
+          title: "작지만 소중한 존재",
+          description: "우리가 작아 보여도 왜 소중한 존재인지 물어봐요.",
+          keyword: "우주 인간 존재 동화",
+        },
+      ],
+    };
+  }
+
+  const topicWith = withTopicParticle(topic, "과", "와");
+  const topicObject = withTopicParticle(topic, "을", "를");
+  return {
+    anchors: [topic, "생각", "질문", "가치", "선택"],
+    promptHint: `Translate ${topic} into an elementary philosophy topic with choices, values, questions, and daily-life meaning.`,
+    fallbackCards: [
+      {
+        title: `${topicWith} 좋은 선택`,
+        description: `${topic}에 대해 생각할 때 무엇이 옳고 서로에게 도움이 되는지 살펴보는 질문이에요.`,
+        keyword: `${topic} 어린이 철학 동화`,
+      },
+      {
+        title: `${topic} 속 소중한 가치`,
+        description: `${topic} 안에 숨어 있는 소중한 가치가 무엇인지 찾아봐요.`,
+        keyword: `${topic} 가치 그림책`,
+      },
+      {
+        title: `${topicObject} 다르게 보기`,
+        description: "당연해 보이는 것을 다시 묻고, 내 생각의 이유를 찾아보는 철학 질문이에요.",
+        keyword: `${topic} 질문 생각 어린이 인문`,
+      },
+    ],
+  };
+}
+
+function topicAwareInterestKeywordFallback(text: string): InterestKeywordOption[] {
+  return getInterestTopicProfile(text).fallbackCards;
+}
+
+function interestAnchorWords(text: string): string[] {
+  return getInterestTopicProfile(text).anchors;
+}
+
+function isInterestRelevantKeywordOption(item: InterestKeywordOption, fallbackText: string): boolean {
+  const anchors = interestAnchorWords(fallbackText);
+  if (anchors.length === 0) return true;
+  const haystack = `${item.title} ${item.description} ${item.keyword}`;
+  return anchors.some((word) => haystack.includes(word));
+}
+
+function repairInterestKeywordSearchPhrase(keyword: string, fallbackText: string, index: number): string {
+  const anchors = interestAnchorWords(fallbackText);
+  if (anchors.some((word) => keyword.includes(word))) return keyword;
+  const fallback = topicAwareInterestKeywordFallback(fallbackText);
+  return fallback[index]?.keyword || `${fallbackText.trim()} ${keyword}`.trim();
 }
 
 function normalizeStableInterestKeywordOptions(
@@ -599,9 +823,14 @@ function normalizeStableInterestKeywordOptions(
       return { title, description, keyword };
     })
     .filter((item): item is InterestKeywordOption => item !== null)
+    .filter((item) => isInterestRelevantKeywordOption(item, fallbackText))
+    .map((item, index) => ({
+      ...item,
+      keyword: repairInterestKeywordSearchPhrase(item.keyword, fallbackText, index),
+    }))
     .slice(0, 3);
 
-  const fallback = stableInterestKeywordFallback(fallbackText);
+  const fallback = topicAwareInterestKeywordFallback(fallbackText);
   const keywords = [...normalized, ...fallback].slice(0, 3);
   return { keywords, recovered: normalized.length !== 3 };
 }
@@ -633,7 +862,12 @@ const stableInterestKeywordSchema = {
 };
 
 function buildStableInterestKeywordPrompt(studentText: string, retry = false): string {
+  const profile = getInterestTopicProfile(studentText);
   const interest = JSON.stringify(studentText.trim() || "궁금한 주제");
+  const anchors = profile.anchors.join(", ");
+  const fallbackExamples = profile.fallbackCards
+    .map((card) => `- ${card.title}: ${card.description} / search: ${card.keyword}`)
+    .join("\n");
   const strictness = retry
     ? "This is a repair attempt. Return a simpler JSON object only. No markdown, no prose."
     : "Return only one valid JSON object. No markdown, no prose.";
@@ -642,16 +876,21 @@ function buildStableInterestKeywordPrompt(studentText: string, retry = false): s
 
 Role: You generate philosophy inquiry keyword cards for Korean elementary grade 3 students.
 Student interest: ${interest}
+Conceptual translation: ${profile.promptHint}
+Required anchor words or close concepts: ${anchors}
+Good topic-specific examples:
+${fallbackExamples}
 
 Rules:
 - First character must be { and last character must be }.
 - Output Korean text only inside JSON values.
 - Create exactly 3 cards in keywords.
-- Card 1: relationship, ethics, peace, promise, or responsibility.
-- Card 2: existence, value, mind, dignity, or something precious but invisible.
-- Card 3: thinking, questioning, seeing the obvious differently.
-- Do not use one fixed template for every topic.
+- Every card must be directly about the student interest.
+- Every card must include at least one required anchor word or close concept in title, description, or tags.
+- Do not output generic cards about promises, invisible hearts, or different thinking unless they clearly connect to the student interest.
+- Do not use one fixed template for every topic. The three cards must be distinct topic-specific inquiry paths.
 - tags must be 1 to 3 Kakao book search phrases for elementary philosophy, humanities, ethics, picture books, or story books.
+- Each tag must also include the student interest or a required anchor word.
 - Avoid comics, learning comics, character entertainment, and title-only keyword matching.
 
 Schema:
@@ -670,7 +909,7 @@ async function generateStableInterestKeywordOptions(
   studentText: string,
 ): Promise<{ keywords: InterestKeywordOption[]; aiSource: InterestKeywordAiSource }> {
   if (!hasGeminiConfig()) {
-    return { keywords: stableInterestKeywordFallback(studentText), aiSource: "fallback" };
+    return { keywords: topicAwareInterestKeywordFallback(studentText), aiSource: "fallback" };
   }
 
   const attempts = [
@@ -715,7 +954,7 @@ async function generateStableInterestKeywordOptions(
   console.warn("[recommend] Gemini interest keyword generation fully failed; using visible fallback.", {
     message: lastError instanceof Error ? lastError.message : String(lastError),
   });
-  return { keywords: stableInterestKeywordFallback(studentText), aiSource: "fallback" };
+  return { keywords: topicAwareInterestKeywordFallback(studentText), aiSource: "fallback" };
 }
 
 function inferPhilosopherName(context: string | null | undefined): string {
@@ -1802,6 +2041,93 @@ function buildRecommendationPayload(
   };
 }
 
+function fallbackLensForInterest(context: RecommendationContext): {
+  philosopherName: string;
+  philosophicalLens: string;
+  philosophyKnowledge: string;
+} {
+  const topic = `${context.sourceText} ${context.selectedKeyword ?? ""}`;
+
+  if (/역사|과거|옛날|기록|시간/.test(topic)) {
+    return {
+      philosopherName: "아렌트",
+      philosophicalLens: "기억과 책임",
+      philosophyKnowledge: "역사를 배운다는 것은 옛날 일을 외우는 것에서 끝나지 않아요. 사람들이 어떤 선택을 했고, 그 선택이 다른 사람에게 어떤 영향을 주었는지 생각해 보는 일이에요.",
+    };
+  }
+  if (/전쟁|평화|갈등/.test(topic)) {
+    return {
+      philosopherName: "칸트",
+      philosophicalLens: "평화와 공존",
+      philosophyKnowledge: "칸트는 사람들이 서로를 함부로 대하지 않고 함께 평화롭게 살 수 있는 약속을 중요하게 생각했어요.",
+    };
+  }
+  if (/공룡|소멸|멸종/.test(topic)) {
+    return {
+      philosopherName: "헤라클레이토스",
+      philosophicalLens: "시간과 변화",
+      philosophyKnowledge: "세상은 계속 변해요. 공룡처럼 사라진 존재를 생각하면, 생명과 시간의 소중함을 물어볼 수 있어요.",
+    };
+  }
+  if (/친구|우정|관계/.test(topic)) {
+    return {
+      philosopherName: "공자",
+      philosophicalLens: "관계와 배려",
+      philosophyKnowledge: "공자는 사람 사이의 관계에서 배려와 책임이 중요하다고 보았어요. 친구와 잘 지내는 일도 작은 철학이에요.",
+    };
+  }
+  if (/화남|감정|마음|피곤|슬픔|기쁨/.test(topic)) {
+    return {
+      philosopherName: "스피노자",
+      philosophicalLens: "감정과 선택",
+      philosophyKnowledge: "스피노자는 감정을 무조건 나쁘게 보지 않았어요. 감정을 이해하면 내가 어떤 선택을 할지 더 잘 생각할 수 있어요.",
+    };
+  }
+  if (/로봇|AI|인공지능|기술/.test(topic)) {
+    return {
+      philosopherName: "칸트",
+      philosophicalLens: "기술 윤리와 책임",
+      philosophyKnowledge: "기술이 편리해도 사람을 소중하게 대해야 한다는 기준은 중요해요. 로봇을 생각하면 책임과 인간다움을 함께 물어볼 수 있어요.",
+    };
+  }
+  if (/우주|별|행성/.test(topic)) {
+    return {
+      philosopherName: "소크라테스",
+      philosophicalLens: "존재와 경이로움",
+      philosophyKnowledge: "넓은 우주를 보면 우리는 작게 느껴질 수 있어요. 하지만 질문하고 생각하는 우리는 아주 소중한 존재예요.",
+    };
+  }
+
+  return {
+    philosopherName: "소크라테스",
+    philosophicalLens: "질문과 가치",
+    philosophyKnowledge: "철학은 당연해 보이는 것도 다시 물어보는 일이에요. 내가 왜 그렇게 생각하는지 이유를 찾아보는 것에서 시작해요.",
+  };
+}
+
+function safeRecommendationFallbackText(
+  book: KakaoBook,
+  grade: "lower" | "higher",
+  context: RecommendationContext,
+): Omit<AiSelection, "selectedIndex"> {
+  const title = book.title.replace(/<[^>]+>/g, "").trim();
+  const topic = context.sourceText.trim() || context.selectedKeyword || "이 주제";
+  const lens = fallbackLensForInterest(context);
+  const shortReason =
+    grade === "lower"
+      ? `${title}은 ${topic}에 대해 쉽고 차근차근 생각해 볼 수 있게 도와주는 책이에요. 책을 읽으며 "무엇이 옳을까?", "왜 그렇게 되었을까?", "나는 어떻게 생각할까?"를 함께 물어볼 수 있어요.`
+      : `${title}은 ${topic}을 단순한 정보가 아니라 생각할 거리로 바라보게 도와주는 책이에요. 책 속 장면을 따라가며 선택, 책임, 가치 같은 철학 질문으로 이어 가기 좋습니다.`;
+
+  return {
+    empathyMessage: `${topic}이 궁금했구나. 그런 궁금함은 세상을 그냥 지나치지 않고 더 깊이 알고 싶어 하는 좋은 시작이에요.`,
+    recommendationReason: shortReason,
+    thinkingQuestion: `${topic}에 대해 생각할 때, 나는 무엇을 가장 소중하게 지키고 싶나요? 그 이유는 무엇일까요?`,
+    philosophyKnowledge: lens.philosophyKnowledge,
+    philosopherName: lens.philosopherName,
+    philosophicalLens: lens.philosophicalLens,
+  };
+}
+
 function compactText(text: string | null | undefined, maxLength = 220): string {
   return (text ?? "")
     .replace(/\s+/g, " ")
@@ -1839,7 +2165,7 @@ async function selectAndDescribeBalanced(
   if (!hasGeminiConfig()) {
     return {
       book: candidateBooks[0],
-      text: friendlyFallbackText(candidateBooks[0], grade, context),
+      text: safeRecommendationFallbackText(candidateBooks[0], grade, context),
       aiSource: "fallback",
     };
   }
@@ -1952,12 +2278,9 @@ Absolute system rules:
     console.warn("[recommend] Gemini balanced recommendation failed.", {
       message: error instanceof Error ? error.message : String(error),
     });
-    if (hasGeminiConfig()) {
-      throw new GeminiUnavailableError("Gemini가 추천 문장을 만들지 못했어요. 잠시 뒤 다시 시도해 주세요.", 502, "gemini_recommendation_failed");
-    }
     return {
       book: candidateBooks[0],
-      text: friendlyFallbackText(candidateBooks[0], grade, context),
+      text: safeRecommendationFallbackText(candidateBooks[0], grade, context),
       aiSource: "fallback",
     };
   }
@@ -2587,9 +2910,6 @@ Rules:
       message: error instanceof Error ? error.message : String(error),
       errorCode: error instanceof GeminiUnavailableError ? error.errorCode : "gemini_chat_failed",
     });
-    if (hasGeminiConfig()) {
-      throw new GeminiUnavailableError("Gemini가 철학자 답변을 만들지 못했어요. 잠시 뒤 다시 시도해 주세요.", 502, "gemini_chat_failed");
-    }
     return {
       philosopherName: personaName,
       reply: safePhilosopherReplyContextual({
