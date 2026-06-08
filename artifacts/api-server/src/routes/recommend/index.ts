@@ -234,12 +234,17 @@ async function generateGeminiText(
     .split(",")
     .map((model) => model.trim())
     .filter(Boolean);
-  const requestBody = JSON.stringify({
-    contents: [{ role: "user", parts }],
+  const makeRequestBody = (schema: unknown | undefined, extraInstruction = "") => JSON.stringify({
+    contents: [
+      {
+        role: "user",
+        parts: extraInstruction ? [...parts, { text: extraInstruction }] : parts,
+      },
+    ],
     generationConfig: {
       maxOutputTokens,
       ...(json ? { responseMimeType: "application/json" } : {}),
-      ...(responseSchema ? { responseSchema } : {}),
+      ...(schema ? { responseSchema: schema } : {}),
     },
   });
 
@@ -256,12 +261,16 @@ async function generateGeminiText(
             "content-type": "application/json",
             "x-goog-api-key": apiKey,
           },
-          body: requestBody,
+          body: makeRequestBody(responseSchema),
         });
 
         if (response.ok) {
           const data = (await response.json()) as {
-            candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+            candidates?: Array<{
+              finishReason?: string;
+              content?: { parts?: Array<{ text?: string }> };
+            }>;
+            promptFeedback?: unknown;
           };
           const text = data.candidates?.[0]?.content?.parts
             ?.map((part) => part.text ?? "")
@@ -269,6 +278,53 @@ async function generateGeminiText(
             .trim();
 
           if (!text) {
+            console.warn("[recommend] Gemini returned no text.", {
+              model,
+              finishReason: data.candidates?.[0]?.finishReason,
+              promptFeedback: data.promptFeedback,
+              raw: JSON.stringify(data).slice(0, 1000),
+            });
+
+            if (responseSchema && json) {
+              const retryResponse = await fetch(requestUrl, {
+                method: "POST",
+                headers: {
+                  "content-type": "application/json",
+                  "x-goog-api-key": apiKey,
+                },
+                body: makeRequestBody(
+                  undefined,
+                  "\nThe previous structured response was empty. Return only one valid JSON object with exactly the requested keys. Do not include markdown.",
+                ),
+              });
+              if (retryResponse.ok) {
+                const retryData = (await retryResponse.json()) as {
+                  candidates?: Array<{
+                    finishReason?: string;
+                    content?: { parts?: Array<{ text?: string }> };
+                  }>;
+                  promptFeedback?: unknown;
+                };
+                const retryText = retryData.candidates?.[0]?.content?.parts
+                  ?.map((part) => part.text ?? "")
+                  .join("")
+                  .trim();
+                if (retryText) return retryText;
+                console.warn("[recommend] Gemini schema-less retry also returned no text.", {
+                  model,
+                  finishReason: retryData.candidates?.[0]?.finishReason,
+                  promptFeedback: retryData.promptFeedback,
+                  raw: JSON.stringify(retryData).slice(0, 1000),
+                });
+              } else {
+                console.warn("[recommend] Gemini schema-less retry failed.", {
+                  model,
+                  status: retryResponse.status,
+                  body: (await retryResponse.text()).slice(0, 1000),
+                });
+              }
+            }
+
             throw new Error(`Gemini API returned no text from ${model}.`);
           }
 
@@ -1388,6 +1444,42 @@ function scoreBookCandidate(
   const infoOnlyWords = ["백과", "도감", "사전", "원리", "실험", "공학", "코딩", "만들기", "작동", "지식", "정보"];
   const adultWords = ["대학", "논문", "전공", "수험", "투자", "주식", "자격증", "석사", "박사", "문제집", "수능"];
 
+  const strongPhilosophyWords = [
+    "철학",
+    "생각",
+    "질문",
+    "윤리",
+    "평화",
+    "공존",
+    "마음",
+    "관계",
+    "정의",
+    "가치",
+    "인권",
+    "감정",
+    "존재",
+    "배려",
+    "책임",
+    "갈등",
+    "약속",
+  ];
+  const comicWords = [
+    "만화",
+    "학습만화",
+    "코믹",
+    "why?",
+    "why ",
+    "살아남기",
+    "보물찾기",
+    "쿠키런",
+    "흔한남매",
+    "카카오프렌즈",
+    "신비아파트",
+    "마법천자문",
+    "놓지 마",
+    "엉덩이 탐정",
+  ];
+
   let score = 0;
   let contentTopicMatches = 0;
   let philosophyMatches = 0;
@@ -1401,6 +1493,15 @@ function scoreBookCandidate(
       philosophyMatches += 1;
       score += title.includes(word) ? 5 : 3;
     }
+  }
+  for (const word of strongPhilosophyWords) {
+    if (haystack.includes(word)) {
+      philosophyMatches += 1;
+      score += title.includes(word) ? 8 : 5;
+    }
+  }
+  for (const word of comicWords) {
+    if (haystack.includes(word)) score -= title.includes(word) ? 35 : 22;
   }
   for (const word of childWords) if (haystack.includes(word)) score += grade === "lower" ? 2 : 1;
   for (const word of infoOnlyWords) if (haystack.includes(word)) score -= philosophyMatches > 0 ? 1 : 4;
@@ -1574,6 +1675,8 @@ Absolute system rules:
 2. No title-only matching:
    Do not choose a popular novel, science fiction, comic, or informational book merely because the keyword appears in the title.
    Choose a real elementary humanities/philosophy/ethics picture book or story that helps the student explore the translated philosophical theme.
+   Avoid simple entertainment comics, 학습만화, 코믹 series, "Why?", "살아남기", "보물찾기", character franchise books, and joke-heavy books unless no better candidate exists.
+   Prefer books whose title or description includes philosophy, thinking, questions, ethics, peace, coexistence, mind, relationship, justice, value, human rights, emotion, or existence.
 3. Cohesive Context:
    empathyMessage, recommendationReason, philosophyKnowledge, and thinkingQuestion must tightly share one philosophical theme.
    Do not use generic Socrates templates such as "너 자신을 알라" or "무지의 지".
@@ -1631,7 +1734,15 @@ Absolute system rules:
         philosopherName: result.philosopherName,
         philosophicalLens: result.philosophicalLens,
       };
-    const repairedText = needsRecommendationRepair(aiText, context, book)
+    const hasAllRecommendationFields = Boolean(
+      aiText.empathyMessage?.trim() &&
+        aiText.recommendationReason?.trim() &&
+        aiText.thinkingQuestion?.trim() &&
+        aiText.philosophyKnowledge?.trim() &&
+        aiText.philosopherName?.trim() &&
+        aiText.philosophicalLens?.trim(),
+    );
+    const repairedText = !hasAllRecommendationFields || needsRecommendationRepair(aiText, context, book)
       ? await repairRecommendationWithGemini({ context, book, grade, flawedText: aiText })
       : aiText;
     return {
@@ -1786,6 +1897,42 @@ function isTooSimilarReply(reply: string, previousReply: string): boolean {
   return overlap / previousWords.length > 0.62;
 }
 
+function isTooShortReply(reply: string, grade: "lower" | "higher"): boolean {
+  const normalized = reply.replace(/\s+/g, " ").trim();
+  const sentenceCount = normalized.split(/[.!?。？！\n]+/).filter((part) => part.trim().length > 0).length;
+  return normalized.length < (grade === "lower" ? 55 : 85) || sentenceCount < 2;
+}
+
+function hasAwkwardChatTone(reply: string): boolean {
+  return /사랑하는\s*얘야|기준을 먼저 찾아야|판단의 기준|소크라테스라면 네 질문에서|근거가 다른 사람에게도 설득력/.test(reply);
+}
+
+function missesLatestQuestion(reply: string, message: string): boolean {
+  const importantWords = tokenizeKoreanish(message).filter(
+    (word) =>
+      word.length >= 2 &&
+      !["그럼", "그러면", "어떻게", "무엇", "뭐가", "왜", "정말", "나는", "우리"].includes(word),
+  );
+  if (importantWords.length === 0) return false;
+  const replyWords = new Set(tokenizeKoreanish(reply));
+  const matched = importantWords.filter((word) => replyWords.has(word) || reply.includes(word)).length;
+  return matched === 0;
+}
+
+function isAcceptableGeminiReply(
+  reply: string,
+  message: string,
+  previousReply: string,
+  grade: "lower" | "higher",
+): boolean {
+  return (
+    !isTooShortReply(reply, grade) &&
+    !isTooSimilarReply(reply, previousReply) &&
+    !hasAwkwardChatTone(reply) &&
+    !missesLatestQuestion(reply, message)
+  );
+}
+
 async function repairPhilosopherReplyWithGemini({
   personaName,
   message,
@@ -1822,6 +1969,8 @@ Rules:
 - Stay tightly on the student's actual question.
 - For grades ${grade === "lower" ? "1-3" : "4-6"}, keep it elementary-student friendly.
 - Use 2-3 short Korean sentences for lower grades, 3-5 for upper grades.
+- Never use "사랑하는 얘야", "기준을 먼저 찾아야 해", "판단의 기준", or "근거가 다른 사람에게도 설득력".
+- Do not write a one-line reply.
 - Return only JSON: {"reply":"..."}`;
 
   const text = await generateGeminiText([{ text: prompt }], 1200, true);
@@ -2141,6 +2290,8 @@ Rules:
 - Connect to the book and philosophical lens only where it fits the student's actual question.
 - Stay in the persona of ${personaName}, but do not overact or lecture.
 - Keep a friendly teacher tone. Avoid stiff wording like "판단의 기준을 먼저 찾고", "과학적으로 이유와 반례", or citation-like book explanations unless the student is old enough and it is necessary.
+- Never use awkward template phrases such as "사랑하는 얘야", "기준을 먼저 찾아야 해", "판단의 기준", or "근거가 다른 사람에게도 설득력".
+- Do not give a one-line reply. The answer must feel like Gemini actually understood the student's latest question.
 - If the student asks a casual or broad question, answer naturally first, then add one simple philosophical idea.
 - Ask at most one short follow-up question, and only if it is different from previous replies.
 - ${grade === "lower"
@@ -2161,7 +2312,7 @@ Rules:
     const parsed = parseModelJson<{ philosopherName?: string; reply?: string }>(text);
     const modelReply = parsed.reply?.trim();
     const reply =
-      modelReply && !isTooSimilarReply(modelReply, previousPhilosopherReply)
+      modelReply && isAcceptableGeminiReply(modelReply, message, previousPhilosopherReply, grade)
         ? modelReply
         : await repairPhilosopherReplyWithGemini({
             personaName,

@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from "react";
+﻿import { useEffect, useState, useRef } from "react";
 import { useLocation } from "wouter";
 import { useGrade } from "@/lib/grade-context";
 import { 
@@ -694,3 +694,4 @@ export default function RecommendPage() {
     </div>
   );
 }
+
