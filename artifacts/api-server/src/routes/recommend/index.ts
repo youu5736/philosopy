@@ -334,7 +334,15 @@ async function generateGeminiText(
         const body = await response.text();
         lastError = new Error(`Gemini API request failed (${response.status}) on ${model}: ${body.slice(0, 500)}`);
 
-        if (response.status === 429 || response.status === 404) {
+        if (response.status === 429) {
+          throw new GeminiUnavailableError(
+            "Gemini API 사용량 한도에 도달했어요. 새 API 키를 넣거나 Google AI Studio의 quota/billing 설정을 확인해 주세요.",
+            429,
+            "gemini_quota_exceeded",
+          );
+        }
+
+        if (response.status === 404) {
           console.warn("[recommend] Gemini model unavailable, trying next model.", {
             model,
             status: response.status,
@@ -347,6 +355,7 @@ async function generateGeminiText(
         }
       } catch (error) {
         lastError = error;
+        if (error instanceof GeminiUnavailableError) throw error;
         if (attempt === 2) break;
       }
 
@@ -518,6 +527,195 @@ async function generateInterestKeywordOptions(
     }
     return fallbackInterestKeywordOptions(studentText);
   }
+}
+
+type InterestKeywordAiSource = "gemini" | "gemini-recovered" | "fallback";
+
+function stableInterestKeywordFallback(text: string): InterestKeywordOption[] {
+  const topic = text.trim() || "궁금한 주제";
+  const topicWith = withTopicParticle(topic, "과", "와");
+  const topicObject = withTopicParticle(topic, "을", "를");
+  return [
+    {
+      title: `${topicWith} 좋은 선택`,
+      description: `${topic}에 대해 생각할 때 무엇이 옳고 서로에게 도움이 되는지 살펴보는 질문이에요.`,
+      keyword: `${topic} 어린이 철학 동화`,
+    },
+    {
+      title: `${topic} 속 소중한 마음`,
+      description: `눈에 잘 보이지 않는 마음과 가치가 ${topic} 안에서 왜 중요한지 생각해 볼 수 있어요.`,
+      keyword: `${topic} 마음 가치 그림책`,
+    },
+    {
+      title: `${topicObject} 다르게 보기`,
+      description: `당연해 보이는 것을 다시 묻고, 내 생각의 이유를 찾아보는 철학 질문이에요.`,
+      keyword: `${topic} 질문 생각 어린이 인문`,
+    },
+  ];
+}
+
+function normalizeStableInterestKeywordOptions(
+  value: unknown,
+  fallbackText: string,
+): { keywords: InterestKeywordOption[]; recovered: boolean } {
+  const rawItems =
+    value && typeof value === "object" && Array.isArray((value as { keywords?: unknown }).keywords)
+      ? (value as { keywords: unknown[] }).keywords
+      : Array.isArray(value)
+        ? value
+        : [];
+
+  const seen = new Set<string>();
+  const normalized = rawItems
+    .map((item) => {
+      if (!item || typeof item !== "object") return null;
+      const record = item as Record<string, unknown>;
+      const title =
+        typeof record.title === "string"
+          ? record.title.trim()
+          : typeof record.keyword === "string"
+            ? record.keyword.trim()
+            : "";
+      const description =
+        typeof record.description === "string"
+          ? record.description.trim()
+          : typeof record.question === "string"
+            ? record.question.trim()
+            : "";
+      const tags = Array.isArray(record.tags)
+        ? record.tags.filter((tag): tag is string => typeof tag === "string" && tag.trim().length > 0)
+        : typeof record.tags === "string"
+          ? record.tags.split(/[,/|]/).map((tag) => tag.trim()).filter(Boolean)
+          : [];
+      const keyword =
+        typeof record.keyword === "string" && record.keyword.trim()
+          ? record.keyword.trim()
+          : tags[0] || (title ? `${fallbackText.trim() || title} 어린이 철학` : "");
+
+      if (!title || !description || !keyword) return null;
+      const key = `${title}|${keyword}`;
+      if (seen.has(key)) return null;
+      seen.add(key);
+      return { title, description, keyword };
+    })
+    .filter((item): item is InterestKeywordOption => item !== null)
+    .slice(0, 3);
+
+  const fallback = stableInterestKeywordFallback(fallbackText);
+  const keywords = [...normalized, ...fallback].slice(0, 3);
+  return { keywords, recovered: normalized.length !== 3 };
+}
+
+const stableInterestKeywordSchema = {
+  type: "OBJECT",
+  properties: {
+    keywords: {
+      type: "ARRAY",
+      minItems: 3,
+      maxItems: 3,
+      items: {
+        type: "OBJECT",
+        properties: {
+          title: { type: "STRING" },
+          description: { type: "STRING" },
+          tags: {
+            type: "ARRAY",
+            minItems: 1,
+            maxItems: 3,
+            items: { type: "STRING" },
+          },
+        },
+        required: ["title", "description", "tags"],
+      },
+    },
+  },
+  required: ["keywords"],
+};
+
+function buildStableInterestKeywordPrompt(studentText: string, retry = false): string {
+  const interest = JSON.stringify(studentText.trim() || "궁금한 주제");
+  const strictness = retry
+    ? "This is a repair attempt. Return a simpler JSON object only. No markdown, no prose."
+    : "Return only one valid JSON object. No markdown, no prose.";
+
+  return `${strictness}
+
+Role: You generate philosophy inquiry keyword cards for Korean elementary grade 3 students.
+Student interest: ${interest}
+
+Rules:
+- First character must be { and last character must be }.
+- Output Korean text only inside JSON values.
+- Create exactly 3 cards in keywords.
+- Card 1: relationship, ethics, peace, promise, or responsibility.
+- Card 2: existence, value, mind, dignity, or something precious but invisible.
+- Card 3: thinking, questioning, seeing the obvious differently.
+- Do not use one fixed template for every topic.
+- tags must be 1 to 3 Kakao book search phrases for elementary philosophy, humanities, ethics, picture books, or story books.
+- Avoid comics, learning comics, character entertainment, and title-only keyword matching.
+
+Schema:
+{
+  "keywords": [
+    {
+      "title": "short Korean title",
+      "description": "one easy Korean sentence for a grade 3 student",
+      "tags": ["Korean book search phrase"]
+    }
+  ]
+}`;
+}
+
+async function generateStableInterestKeywordOptions(
+  studentText: string,
+): Promise<{ keywords: InterestKeywordOption[]; aiSource: InterestKeywordAiSource }> {
+  if (!hasGeminiConfig()) {
+    return { keywords: stableInterestKeywordFallback(studentText), aiSource: "fallback" };
+  }
+
+  const attempts = [
+    { prompt: buildStableInterestKeywordPrompt(studentText), schema: stableInterestKeywordSchema },
+    { prompt: buildStableInterestKeywordPrompt(studentText, true), schema: undefined },
+  ];
+
+  let lastError: unknown = null;
+
+  for (const [index, attempt] of attempts.entries()) {
+    try {
+      const text = await generateGeminiText(
+        [{ text: attempt.prompt }],
+        1536,
+        true,
+        attempt.schema,
+      );
+      const normalized = normalizeStableInterestKeywordOptions(
+        parseModelJson<unknown>(text),
+        studentText,
+      );
+      return {
+        keywords: normalized.keywords,
+        aiSource: normalized.recovered || index > 0 ? "gemini-recovered" : "gemini",
+      };
+    } catch (error) {
+      lastError = error;
+      console.warn("[recommend] Stable Gemini interest keyword attempt failed.", {
+        attempt: index + 1,
+        message: error instanceof Error ? error.message : String(error),
+        errorCode: error instanceof GeminiUnavailableError ? error.errorCode : undefined,
+      });
+      if (
+        error instanceof GeminiUnavailableError &&
+        error.errorCode === "gemini_quota_exceeded"
+      ) {
+        break;
+      }
+    }
+  }
+
+  console.warn("[recommend] Gemini interest keyword generation fully failed; using visible fallback.", {
+    message: lastError instanceof Error ? lastError.message : String(lastError),
+  });
+  return { keywords: stableInterestKeywordFallback(studentText), aiSource: "fallback" };
 }
 
 function inferPhilosopherName(context: string | null | undefined): string {
@@ -1904,7 +2102,13 @@ function isTooShortReply(reply: string, grade: "lower" | "higher"): boolean {
 }
 
 function hasAwkwardChatTone(reply: string): boolean {
-  return /사랑하는\s*얘야|기준을 먼저 찾아야|판단의 기준|소크라테스라면 네 질문에서|근거가 다른 사람에게도 설득력/.test(reply);
+  return /사랑하는\s*얘야|얘야|기준을 먼저 찾아야|판단의 기준|소크라테스라면 네 질문에서|근거가 다른 사람에게도 설득력/.test(reply);
+}
+
+function hasForeignLanguageNoise(reply: string): boolean {
+  const allowed = /\b(?:AI|API|Gemini|Kakao|URL|JSON)\b/g;
+  const withoutAllowed = reply.replace(allowed, "");
+  return /[A-Za-zÀ-ſ]{4,}/.test(withoutAllowed);
 }
 
 function missesLatestQuestion(reply: string, message: string): boolean {
@@ -1914,9 +2118,30 @@ function missesLatestQuestion(reply: string, message: string): boolean {
       !["그럼", "그러면", "어떻게", "무엇", "뭐가", "왜", "정말", "나는", "우리"].includes(word),
   );
   if (importantWords.length === 0) return false;
-  const replyWords = new Set(tokenizeKoreanish(reply));
-  const matched = importantWords.filter((word) => replyWords.has(word) || reply.includes(word)).length;
+  const replyTokens = tokenizeKoreanish(reply);
+  const matched = importantWords.filter((word) =>
+    replyTokens.some((token) => token.includes(word) || word.includes(token)) || reply.includes(word),
+  ).length;
   return matched === 0;
+}
+
+function softenGeminiReply(reply: string, message: string, grade: "lower" | "higher"): string {
+  const KoreanOnlyReply = reply
+    .split(/(?<=[.!?。！？요다까니])\s+/)
+    .filter((sentence) => !hasForeignLanguageNoise(sentence))
+    .join(" ")
+    .trim();
+  const cleaned = (KoreanOnlyReply || reply)
+    .replace(/사랑하는\s*얘야[,.!?\s]*/g, "")
+    .replace(/얘야[,.!?\s]*/g, "")
+    .replace(/기준을 먼저 찾아야 해/g, "함께 천천히 생각해 보자")
+    .replace(/판단의 기준/g, "생각의 방향")
+    .replace(/근거가 다른 사람에게도 설득력/g, "다른 친구도 이해할 수 있는 이유")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!isTooShortReply(cleaned, grade)) return cleaned;
+  return `${cleaned} 네 질문인 "${message}"에는 우리가 세상 속에서 어떤 존재인지 생각해 보려는 마음이 담겨 있어. 그 마음을 붙잡고, 책에서 본 생각과 이어서 한 걸음 더 물어보면 좋아.`;
 }
 
 function isAcceptableGeminiReply(
@@ -1929,6 +2154,7 @@ function isAcceptableGeminiReply(
     !isTooShortReply(reply, grade) &&
     !isTooSimilarReply(reply, previousReply) &&
     !hasAwkwardChatTone(reply) &&
+    !hasForeignLanguageNoise(reply) &&
     !missesLatestQuestion(reply, message)
   );
 }
@@ -1971,12 +2197,17 @@ Rules:
 - Use 2-3 short Korean sentences for lower grades, 3-5 for upper grades.
 - Never use "사랑하는 얘야", "기준을 먼저 찾아야 해", "판단의 기준", or "근거가 다른 사람에게도 설득력".
 - Do not write a one-line reply.
+- Use Korean only. Do not include English, Portuguese, romanized words, or mixed-language sentences.
 - Return only JSON: {"reply":"..."}`;
 
   const text = await generateGeminiText([{ text: prompt }], 1200, true);
   const parsed = parseModelJson<{ reply?: string }>(text);
   if (!parsed.reply?.trim()) throw new Error("Gemini repair returned no reply.");
-  return parsed.reply.trim();
+  const repaired = parsed.reply.trim();
+  if (hasForeignLanguageNoise(repaired)) {
+    throw new Error("Gemini repair returned mixed-language reply.");
+  }
+  return repaired;
 }
 
 function isSpaceTopic(text: string): boolean {
@@ -2298,6 +2529,7 @@ Rules:
     ? "For grades 1-3: use 2-3 short sentences, everyday examples like friends/classroom/home, no hard terms unless immediately explained."
     : "For grades 4-6: use 3-5 clear sentences, include one easy concept word such as 기준/책임/정체성/관계 and explain it simply."}
 - Always remember the student is in elementary school. Never sound like a university lecture.
+- Use Korean only. Do not include English, Portuguese, romanized words, or mixed-language sentences.
 - Return only JSON.`;
 
   try {
@@ -2311,19 +2543,40 @@ Rules:
     });
     const parsed = parseModelJson<{ philosopherName?: string; reply?: string }>(text);
     const modelReply = parsed.reply?.trim();
-    const reply =
-      modelReply && isAcceptableGeminiReply(modelReply, message, previousPhilosopherReply, grade)
-        ? modelReply
-        : await repairPhilosopherReplyWithGemini({
-            personaName,
-            message,
-            grade,
-            bookTitle,
-            philosophicalLens,
-            previousStudentMessage,
-            previousPhilosopherReply,
-            flawedReply: modelReply,
-          });
+    let repairAttempted = false;
+    let repairFailedReason: string | null = null;
+    let reply = modelReply && isAcceptableGeminiReply(modelReply, message, previousPhilosopherReply, grade)
+      ? modelReply
+      : "";
+
+    if (!reply) {
+      repairAttempted = true;
+      try {
+        reply = await repairPhilosopherReplyWithGemini({
+          personaName,
+          message,
+          grade,
+          bookTitle,
+          philosophicalLens,
+          previousStudentMessage,
+          previousPhilosopherReply,
+          flawedReply: modelReply,
+        });
+      } catch (repairError) {
+        repairFailedReason = repairError instanceof Error ? repairError.message : String(repairError);
+        console.warn("[recommend] Gemini chat repair failed; using first Gemini reply if available.", {
+          modelReplyExists: Boolean(modelReply),
+          repairAttempted,
+          repairFailedReason,
+        });
+        if (modelReply) {
+          reply = softenGeminiReply(modelReply, message, grade);
+        } else {
+          throw repairError;
+        }
+      }
+    }
+
     return {
       philosopherName: parsed.philosopherName?.trim() || personaName,
       reply,
@@ -2332,6 +2585,7 @@ Rules:
   } catch (error) {
     console.warn("[recommend] Gemini balanced philosopher chat failed.", {
       message: error instanceof Error ? error.message : String(error),
+      errorCode: error instanceof GeminiUnavailableError ? error.errorCode : "gemini_chat_failed",
     });
     if (hasGeminiConfig()) {
       throw new GeminiUnavailableError("Gemini가 철학자 답변을 만들지 못했어요. 잠시 뒤 다시 시도해 주세요.", 502, "gemini_chat_failed");
@@ -2362,8 +2616,8 @@ router.post("/recommend/interest-keywords", async (req, res): Promise<void> => {
   }
 
   try {
-    const keywords = await generateInterestKeywordOptions(parsed.data.text);
-    res.json({ keywords, aiSource: "gemini" });
+    const result = await generateStableInterestKeywordOptions(parsed.data.text);
+    res.json(result);
   } catch (error) {
     req.log.warn({ stage: "interest-keywords:gemini", err: error }, "Interest keyword generation failed");
     if (sendGeminiError(res, error)) return;

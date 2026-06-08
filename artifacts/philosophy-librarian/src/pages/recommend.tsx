@@ -58,6 +58,7 @@ export default function RecommendPage() {
   const [chatMessages, setChatMessages] = useState<PhilosopherChatMessage[]>([]);
   const [philosopherName, setPhilosopherName] = useState<string | null>(null);
   const [apiError, setApiError] = useState<string | null>(null);
+  const [chatError, setChatError] = useState<string | null>(null);
 
   // Redirect if no grade selected
   useEffect(() => {
@@ -78,22 +79,53 @@ export default function RecommendPage() {
     keywordMutation.isPending ||
     keywordRecommendMutation.isPending;
 
+  const getStudentFacingAiError = (error: any, area: "book" | "chat") => {
+    const data = error?.response?.data;
+    const rawMessage = String(data?.error || error?.message || "");
+    const errorCode = String(data?.errorCode || "");
+    const combined = `${errorCode} ${rawMessage}`.toLowerCase();
+
+    console.warn("[recommend] AI request failed", {
+      area,
+      errorCode: data?.errorCode,
+      aiSource: data?.aiSource,
+      message: rawMessage,
+    });
+
+    if (
+      combined.includes("quota") ||
+      combined.includes("429") ||
+      combined.includes("gemini_quota_exceeded") ||
+      combined.includes("사용량")
+    ) {
+      return "지금은 AI 사용량이 잠시 꽉 찼어요. 잠시 뒤 다시 시도하거나 새 Gemini API 키를 설정해 주세요.";
+    }
+
+    if (
+      combined.includes("api key") ||
+      combined.includes("config") ||
+      combined.includes("environment")
+    ) {
+      return "AI 사서 선생님이 아직 준비 중이에요. 관리자에게 Gemini API 키 설정을 확인해 달라고 해 주세요.";
+    }
+
+    if (area === "chat") {
+      return "철학자가 답을 정리하는 중에 문제가 생겼어요. 질문을 조금 짧게 바꿔서 다시 보내 볼래요?";
+    }
+
+    return "책을 찾는 중에 문제가 생겼어요. 관심사를 조금 다르게 적어서 다시 시도해 볼래요?";
+  };
+
   const resetChat = () => {
     setChatOpen(false);
     setChatInput("");
     setChatMessages([]);
     setPhilosopherName(null);
+    setChatError(null);
   };
 
   const handleApiError = (error: any) => {
-    const data = error?.response?.data;
-    const msg = data?.error || error?.message || "";
-    const code = data?.errorCode ? ` [${data.errorCode}]` : "";
-    if (msg.toLowerCase().includes("api key") || msg.toLowerCase().includes("config")) {
-      setApiError(`AI 사서 선생님이 아직 준비 중이에요! 관리자에게 API 키 설정을 부탁해 주세요. 🔑${code}${msg ? ` ${msg}` : ""}`);
-    } else {
-      setApiError(`앗, 책을 찾는 중에 문제가 생겼어요. 다시 한 번 시도해줄래요? 😥${code}${msg ? ` ${msg}` : ""}`);
-    }
+    setApiError(`앗, ${getStudentFacingAiError(error, "book")} 😥`);
   };
 
   const handleTextSubmit = () => {
@@ -224,6 +256,7 @@ export default function RecommendPage() {
     const history = chatMessages;
 
     setChatInput("");
+    setChatError(null);
     setChatMessages((messages) => [...messages, studentMessage]);
 
     philosopherChatMutation.mutate(
@@ -249,14 +282,8 @@ export default function RecommendPage() {
             { role: "philosopher", content: data.reply },
           ]);
         },
-        onError: () => {
-          setChatMessages((messages) => [
-            ...messages,
-            {
-              role: "philosopher",
-              content: "잠깐 생각이 길어졌구나. 다시 한 번 천천히 물어봐 줄래?",
-            },
-          ]);
+        onError: (error: any) => {
+          setChatError(getStudentFacingAiError(error, "chat"));
         },
       }
     );
@@ -656,6 +683,11 @@ export default function RecommendPage() {
                   </ScrollArea>
 
                   <div className="shrink-0 border-t bg-white p-4">
+                    {chatError && (
+                      <div className="mb-3 rounded-2xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm leading-relaxed text-destructive-foreground">
+                        {chatError}
+                      </div>
+                    )}
                     <div className="flex flex-col gap-3 sm:flex-row">
                       <Textarea
                         value={chatInput}
