@@ -2,6 +2,7 @@ import { useLocation } from "wouter";
 import { BookOpen, Sparkles } from "lucide-react";
 import { useGrade } from "@/lib/grade-context";
 import owlImage from "@/assets/images/librarian-owl.png";
+import howToUseVideo from "@/assets/videos/how-to-use.mp4";
 
 export default function Home() {
   const [, setLocation] = useLocation();
@@ -18,7 +19,7 @@ export default function Home() {
       <div className="absolute top-[-10%] left-[-10%] w-96 h-96 bg-primary/20 rounded-full blur-3xl" />
       <div className="absolute bottom-[-10%] right-[-10%] w-96 h-96 bg-secondary/20 rounded-full blur-3xl" />
       
-      <div className="z-10 max-w-2xl w-full text-center space-y-12">
+      <div className="z-10 max-w-4xl w-full text-center space-y-10 py-8">
         <div className="space-y-6 animate-in fade-in slide-in-from-bottom-8 duration-700">
           <div className="relative inline-block">
             <img 
@@ -40,6 +41,23 @@ export default function Home() {
             너의 마음을 이야기해주면, 딱 맞는 철학 책을 찾아줄게.
           </p>
         </div>
+
+        <section className="mx-auto w-full max-w-3xl animate-in fade-in slide-in-from-bottom-10 duration-700 delay-100 fill-mode-both">
+          <div className="rounded-[1.5rem] border-2 border-primary/20 bg-white/90 p-4 shadow-sm">
+            <div className="mb-3 flex items-center justify-center gap-2 text-foreground">
+              <BookOpen className="h-5 w-5 text-primary-foreground" />
+              <h2 className="font-display text-2xl">이용 방법 영상</h2>
+            </div>
+            <video
+              src={howToUseVideo}
+              controls
+              preload="metadata"
+              className="aspect-video w-full rounded-2xl border border-border bg-black object-contain shadow-inner"
+            >
+              이 브라우저에서는 영상을 볼 수 없어요.
+            </video>
+          </div>
+        </section>
 
         <div className="grid md:grid-cols-2 gap-6 w-full px-4 animate-in fade-in slide-in-from-bottom-12 duration-700 delay-150 fill-mode-both">
           <button
